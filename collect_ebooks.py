@@ -281,6 +281,7 @@ def process_book_list(list_file, search_dir, from_clipboard=False):
 
     # 处理每本书
     results = []
+    log_results = []  # 新增：用于记录详细日志
     for book_name in book_names:
         clean_name = clean_filename(book_name)
 
@@ -288,23 +289,28 @@ def process_book_list(list_file, search_dir, from_clipboard=False):
             stats['existing'] += 1
             result = f"《{book_name}》: 跳过（输出目录已存在：{existing_files[clean_name]}）"
             results.append(result)
+            log_results.append(result)  # 跳过的文件记录相同
             continue
 
         file_path = search_file(book_name, search_path)
         if file_path == "未找到":
             stats['not_found'].append(book_name)
+            log_results.append(f"《{book_name}》: 未找到")
         else:
             stats['found'] += 1
             try:
                 shutil.copy2(file_path, output_dir)
                 stats['copied'] += 1
+                # 结果文件只记录文件名
+                results.append(f"- 《{book_name}》")
+                # 日志文件记录完整路径
+                log_results.append(f"《{book_name}》: 已复制 {file_path} -> {output_dir}")
             except Exception as e:
                 stats['copy_failed'].append((book_name, str(e)))
+                error_msg = f"《{book_name}》: 复制失败 - 源文件：{file_path}, 错误：{str(e)}"
+                log_results.append(error_msg)
 
-        result = f"《{book_name}》: {file_path}"
-        results.append(result)
-
-    # 将结果写入结果文件
+    # 将结果写入结果文件（简化版）
     with result_file.open('w', encoding='utf-8') as f:
         f.write("处理总结：\n")
         f.write(f"总共需要处理的文件数：{stats['total']}\n")
@@ -313,7 +319,6 @@ def process_book_list(list_file, search_dir, from_clipboard=False):
         f.write(f"成功复制的文件数：{stats['copied']}\n")
         f.write(f"未找到的文件数：{len(stats['not_found'])}\n\n")
 
-        # 添加已找到并成功复制的文件清单
         if stats['copied'] > 0:
             f.write("已找到并复制的文件：\n")
             for result in results:
@@ -324,17 +329,16 @@ def process_book_list(list_file, search_dir, from_clipboard=False):
         if stats['not_found']:
             f.write("未找到的文件清单：\n")
             for book in stats['not_found']:
-                f.write(f"- {book}\n")
+                f.write(f"- 《{book}》\n")
             f.write("\n")
 
-        if stats['copy_failed']:
-            f.write("复制失败的文件：\n")
-            for book, error in stats['copy_failed']:
-                f.write(f"- {book}: {error}\n")
-
-    # 将详细结果写入日志文件
+    # 将详细结果写入日志文件（包含完整路径）
     with log_file.open('w', encoding='utf-8') as f:
-        f.write('\n'.join(results))
+        f.write(f"处理时间：{time.strftime('%Y-%m-%d %H:%M:%S')}\n")
+        f.write(f"搜索目录：{search_dir}\n")
+        f.write(f"输出目录：{output_dir}\n")
+        f.write("="*50 + "\n\n")
+        f.write('\n'.join(log_results))
 
     print(f"\n处理日志已保存到：{log_file}")
     print(f"处理结果已保存到：{result_file}")
