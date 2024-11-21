@@ -313,6 +313,14 @@ def process_book_list(list_file, search_dir, from_clipboard=False):
         f.write(f"成功复制的文件数：{stats['copied']}\n")
         f.write(f"未找到的文件数：{len(stats['not_found'])}\n\n")
 
+        # 添加已找到并成功复制的文件清单
+        if stats['copied'] > 0:
+            f.write("已找到并复制的文件：\n")
+            for result in results:
+                if "未找到" not in result and "跳过" not in result:
+                    f.write(f"{result}\n")
+            f.write("\n")
+
         if stats['not_found']:
             f.write("未找到的文件清单：\n")
             for book in stats['not_found']:
