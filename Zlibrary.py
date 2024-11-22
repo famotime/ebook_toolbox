@@ -3,7 +3,7 @@ Copyright (c) 2023-2024 Bipinkrish
 This file is part of the Zlibrary-API by Bipinkrish
 Zlibrary-API / Zlibrary.py
 
-For more information, see: 
+For more information, see:
 https://github.com/bipinkrish/Zlibrary-API/
 """
 
@@ -296,14 +296,10 @@ class Zlibrary:
 
     def __getBookFile(self, bookid: [int, str], hashid: str) -> [(str, bytes), None]:
         response = self.__makeGetRequest(f"/eapi/book/{bookid}/{hashid}/file")
-        filename = response["file"]["description"]
 
-        try:
-            filename += " (" + response["file"]["author"] + ")"
-        except:
-            pass
-        finally:
-            filename += "." + response["file"]["extension"]
+        # 只使用原始文件名，添加扩展名
+        filename = response["file"]["description"]
+        filename += "." + response["file"]["extension"]
 
         ddl = response["file"]["downloadLink"]
         headers = self.__headers.copy()

@@ -88,48 +88,87 @@ class ZLibraryDownloader:
             # 搜索图书
             results = self.client.search(message=book_name, extensions=["epub"])
             if not results.get("books"):
-                print(f"未找到图书: {book_name}")
+                print(f"未找到: 《{book_name}》")
                 return None
 
-            # 获取第一个搜索结果
-            book = results["books"][0]
-            print(f"找到图书: {book['title']} by {book.get('author', '未知作者')}")
+            # 获取搜索结果中文件名包含书名的图书
+            found_book = None
+            for book in results["books"]:
+                if book_name.lower() in book['title'].lower():
+                    found_book = book
+                    break
+
+            if not found_book:
+                print(f"未找到: 《{book_name}》")
+                return None
+
+            print(f"找到: 《{found_book['title']}》 by {found_book.get('author', '未知作者')}")
 
             # 检查剩余下载次数
             downloads_left = self.client.getDownloadsLeft()
+            print(f"今日剩余下载次数: {downloads_left}")
             if downloads_left <= 0:
                 print("今日下载次数已用完")
                 return None
 
             # 下载图书
-            filename, content = self.client.downloadBook(book)
+            filename, content = self.client.downloadBook(found_book)
             if not content:
-                print(f"下载失败: {book_name}")
+                print(f"下载失败: 《{book_name}》")
+                self.update_result_file(book_name, success=False)
                 return None
 
             # 直接保存到目标目录
             file_path = self.config.target_dir / filename
             with file_path.open('wb') as f:
                 f.write(content)
+
+            # 更新结果文件，传入实际的文件名
+            self.update_result_file(book_name, success=True, filename=filename)
             return file_path
 
         except Exception as e:
             print(f"处理图书时出错: {e}")
+            self.update_result_file(book_name, success=False)
             return None
 
-    def update_result_file(self, book_name: str, success: bool):
+    def update_result_file(self, book_name: str, success: bool, filename: str = None):
         """更新处理结果文件"""
         with self.config.result_file.open('r', encoding='utf-8') as f:
             lines = f.readlines()
 
+        new_lines = []
+        found_section = False
+        missing_section = False
+        skip_next_line = False
+
+        for line in lines:
+            if skip_next_line:
+                skip_next_line = False
+                continue
+
+            # 检查是否进入"已找到并复制的文件："部分
+            if line.strip() == "已找到并复制的文件：":
+                found_section = True
+                new_lines.append(line)
+                if success:
+                    new_lines.append(f"- 《{book_name}》 -> {filename} \n")
+                continue
+
+            # 检查是否进入"未找到的文件清单："部分
+            if line.strip() == "未找到的文件清单：":
+                missing_section = True
+                new_lines.append(line)
+                continue
+
+            # 如果在未找到部分且当前行是要处理的书名，跳过该行
+            if missing_section and line.strip() == f"- 《{book_name}》":
+                continue
+
+            new_lines.append(line)
+
         with self.config.result_file.open('w', encoding='utf-8') as f:
-            for line in lines:
-                if not line.strip().endswith(book_name):
-                    f.write(line)
-            if success:
-                f.write(f"已下载: {book_name}\n")
-            else:
-                f.write(f"下载失败: {book_name}\n")
+            f.writelines(new_lines)
 
     def run(self):
         """运行下载流程"""
@@ -137,28 +176,49 @@ class ZLibraryDownloader:
         print(f"找到 {len(missing_books)} 本待下载的图书")
 
         for book_name in missing_books:
-            print(f"\n正在处理: {book_name}")
+            print(f"\n正在处理: 《{book_name}》")
 
             # 搜索并下载
             file_path = self.search_and_download_book(book_name)
             if not file_path:
-                self.update_result_file(book_name, success=False)
                 continue
 
             print(f"成功下载到: {file_path}")
-            self.update_result_file(book_name, success=True)
 
             # 添加延时避免请求过于频繁
             time.sleep(2)
 
+def find_result_files(root_dir: Path) -> list[Path]:
+    """搜索指定目录及子目录下的所有处理结果文件"""
+    return list(root_dir.rglob("处理结果.txt"))
+
 if __name__ == "__main__":
-    result_file = Path("J:\书单\死磕这5本散文集！文笔真的可以脱胎换骨！\处理结果.txt")
+    # 指定要搜索的根目录
+    root_dir = Path("J:/书单")
 
     # 从配置文件加载账号信息
     config = ZLibraryConfig.load_account_info()
-    # 更新其他配置
-    config.result_file = result_file
-    config.target_dir = result_file.parent
 
-    downloader = ZLibraryDownloader(config)
-    downloader.run()
+    # 查找所有处理结果文件
+    result_files = find_result_files(root_dir)
+    print(f"找到 {len(result_files)} 个处理结果文件")
+
+    # 逐个处理每个结果文件
+    for result_file in result_files:
+        print(f"\n开始处理目录: {result_file.parent}")
+
+        # 更新配置
+        config.result_file = result_file
+        config.target_dir = result_file.parent
+
+        try:
+            # 创建下载器并运行
+            downloader = ZLibraryDownloader(config)
+            downloader.run()
+        except Exception as e:
+            print(f"处理 {result_file} 时出错: {e}")
+            continue
+
+        print(f"完成处理: {result_file}")
+        # 在处理不同目录之间添加较长的延时
+        time.sleep(5)
