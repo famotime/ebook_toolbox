@@ -1,17 +1,27 @@
 # ebook_toolbox 电子书处理工具箱
 
+## 完整工具列表
+
+1. `collect_ebooks.py`: 电子书搜索与整理工具
+2. `rename_epub_with_catalog.py`: EPUB合集文件名处理工具
+3. `clean_booknames.py`: 书名格式清理工具
+4. `download_ebooks_from_zlibrary.py`: Z-Library电子书下载工具
+5. `Zlibrary.py`: Z-Library API封装库
+
+
+
 ## 主要功能
 
 ### 1. 电子书搜索与整理 (collect_ebooks.py)
 
-这个脚本用于在本地硬盘上查找指定的电子书文件，并将它们复制到新的目录中。
+根据书单内容在本地硬盘上查找指定的电子书文件，并将它们复制到整理到对应书单目录中。
 
 主要功能：
 - 支持从剪贴板或文本文件读取书名清单（使用《》标记的书名）
+
 - 按文件类型优先级搜索：epub > pdf > txt
-- 生成搜索目录的文件缓存，提升搜索性能
-- 自动跳过系统目录和特殊文件夹
-- 生成详细的处理报告和日志
+
+  
 
 
 ### 2. EPUB合集文件名补充目录信息 (rename_epub_with_catalog.py)
@@ -25,6 +35,38 @@
 - 自动删除文件名中的"(Z-Library)"字符
 - 处理过长文件名，自动截断并保存完整信息
 - 生成详细的处理日志
+
+### 3. 书名清理工具 (clean_booknames.py)
+
+这个脚本用于清理和标准化书名格式。
+
+主要功能：
+- 清理书名中的多余字符和标点
+- 统一书名的《》标记格式
+- 删除常见的广告后缀
+- 批量处理文本文件中的书名
+
+### 4. Z-Library电子书下载工具 (download_ebooks_from_zlibrary.py)
+
+这个脚本提供了从Z-Library自动下载电子书的功能。
+
+主要功能：
+- 支持批量下载指定书名的电子书
+- 自动处理登录和搜索过程
+- 支持多种下载格式选择
+- 自动重试和错误处理
+- 生成下载报告和日志
+
+### 5. Z-Library API封装 (Zlibrary.py)
+
+这是一个封装了Z-Library网站API的工具类。
+
+主要功能：
+- 提供登录认证接口
+- 封装搜索和下载功能
+- 处理请求限制和错误
+- 管理会话和cookies
+- 提供便捷的API调用方法
 
 ## 使用方法
 
@@ -88,7 +130,7 @@
 4. 输出文件：
    - rename_log.log：记录所有处理操作
    - 目录信息文件（可选）：保存被截断的完整目录信息
-   
+
 5. 使用示例：
    ```bash
    # 原文件名
@@ -107,3 +149,44 @@
    - 建议先备份重要文件再进行处理
    - 处理过程中请勿修改文件名
    - 需要安装 ebooklib 库：`pip install ebooklib`
+
+### 书名清理工具使用
+
+```python
+from clean_booknames import clean_names
+# 清理单个书名
+cleaned = clean_names("<<三体>>（全集）【精校版】.txt")  # 返回：《三体》
+
+# 清理文件中的书名
+clean_names("input.txt", "output.txt")
+```
+
+### Z-Library下载工具使用
+
+1. 配置账号信息：
+```python
+ZLIBRARY_EMAIL = "your_email@example.com"
+ZLIBRARY_PASSWORD = "your_password"
+```
+
+2. 准备书单文件：
+```text
+《三体》
+《百年孤独》
+《人类简史》
+```
+
+3. 运行下载：
+```python
+from download_ebooks_from_zlibrary import download_books
+download_books("booklist.txt", "downloads")
+```
+
+
+
+## 依赖库
+
+- ebooklib
+- pyperclip
+- requests
+

@@ -1,18 +1,25 @@
 """
-在本地硬盘上查找一个清单文件中的所有电子书，并复制到一个新的目录中。
+在本地硬盘上查找书单中的所有电子书，并复制到一个新的目录中。
 
 功能说明：
-1. 清单文件包含使用《》包裹的书名
-2. 搜索规则：
+1. 支持两种输入方式：
+   - 从剪贴板读取（监控模式）
+   - 从文件读取（直接处理模式）
+2. 清单格式要求：
+   - 必须包含使用《》包裹的书名
+   - 使用剪贴板时，第一行作为输出目录名
+3. 搜索规则：
    - 文件名必须以搜索词开头（忽略标点符号和大小写）
    - 支持中文、英文和数字
    - 文件类型优先级：epub > pdf > txt
-3. 处理流程：
+   - 同类型文件优先选择更大的文件，大小相同则选择更新的文件
+4. 处理流程：
    - 首次运行时生成搜索目录下的文件列表（_file_list.txt）
    - 跳过已经存在于输出目录中的文件
-   - 生成处理结果文件（清单文件名_结果.txt）
-   - 复制找到的文件到输出目录
-4. 输出报告：
+   - 生成两个结果文件：
+     * 处理结果.txt：简要统计和文件列表
+     * 处理日志.txt：详细的处理记录和完整路径
+5. 输出报告：
    - 总文件数统计
    - 已存在文件数
    - 新找到文件数
@@ -21,9 +28,9 @@
    - 复制失败文件列表
 
 注意事项：
-- 跳过系统目录和特殊文件夹的扫描
-- 不验证文件是否真实存在
+- 自动跳过系统目录和特殊文件夹的扫描
 - 使用文件缓存提升搜索性能
+- 监控模式下，粘贴不包含《》的内容可退出程序
 """
 
 from pathlib import Path
@@ -343,11 +350,42 @@ def process_book_list(list_file, search_dir, from_clipboard=False):
     print(f"\n处理日志已保存到：{log_file}")
     print(f"处理结果已保存到：{result_file}")
 
+def monitor_clipboard(search_dir):
+    """
+    监控系统剪贴板，发现新的书单就处理
+    Args:
+        search_dir: 搜索目录路径
+    """
+    last_content = ""
+    print("开始监控剪贴板，粘贴包含《》的内容开始处理，粘贴不包含《》的内容结束程序...")
 
+    while True:
+        try:
+            current_content = pyperclip.paste()
+            # 如果剪贴板内容发生变化
+            if current_content != last_content:
+                last_content = current_content
+
+                # 检查是否包含书名标记
+                if "《" in current_content and "》" in current_content:
+                    print("\n检测���新的书单，开始处理...")
+                    process_book_list(r"J:\书单", search_dir, from_clipboard=True)
+                    print("\n继续监控剪贴板...")
+                else:
+                    print("\n检测到不包含书名的内容，退出程序")
+                    break
+
+            time.sleep(1)  # 降低CPU占用
+
+        except KeyboardInterrupt:
+            print("\n用户中断，退出程序")
+            break
+        except Exception as e:
+            print(f"\n发生错误: {e}")
+            continue
+
+# 修改主函数部分
 if __name__ == "__main__":
-    # 清单文件路径
-    # list_file = r"C:\Users\Administrator\Desktop\超人书单.md"
-
     # 搜索目录路径
     search_dir = r"J:"
 
@@ -356,12 +394,8 @@ if __name__ == "__main__":
         if check_file_list_update(search_dir):
             generate_file_list(search_dir)
 
-        # 从文件读取
-        # process_book_list(list_file, search_dir, from_clipboard=False)
+        # 启动剪贴板监控
+        monitor_clipboard(search_dir)
 
-        # 或从剪贴板读取
-        process_book_list(r"J:\书单", search_dir, from_clipboard=True)
-
-        print("处理完成！")
     except Exception as e:
         print(f"处理失败: {e}")
