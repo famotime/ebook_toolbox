@@ -23,16 +23,13 @@ import json
 class ZLibraryConfig:
     target_dir: Path = Path("ebooks")
     result_file: Path = Path("处理结果.txt")
-    # Zlibrary登录凭据，默认为空，将从配置文件读取
-    email: str = ""
-    password: str = ""
-    # 或者使用 remix token (推荐)
+    # 移除email和password字段，只保留remix token相关字段
     remix_userid: str = ""
     remix_userkey: str = ""
 
     @classmethod
     def load_account_info(cls, config_path: Path = None):
-        """从配置文件加载账号信息"""
+        """从配置文件加载账号信息，并获取remix token"""
         if config_path is None:
             config_path = Path(__file__).parent.parent / "account" / "web_accounts.json"
 
@@ -40,9 +37,21 @@ class ZLibraryConfig:
             with config_path.open('r', encoding='utf-8') as f:
                 accounts = json.load(f)
                 zlibrary_account = accounts.get("zlibrary", {})
+
+                # 如果配置中有email和password，则先获取remix token
+                if zlibrary_account.get("email") and zlibrary_account.get("password"):
+                    temp_client = Zlibrary(
+                        email=zlibrary_account["email"],
+                        password=zlibrary_account["password"]
+                    )
+                    profile = temp_client.getProfile()["user"]
+                    return cls(
+                        remix_userid=str(profile["id"]),
+                        remix_userkey=profile["remix_userkey"]
+                    )
+
+                # 否则直接使用配置中的remix token
                 return cls(
-                    email=zlibrary_account.get("email", ""),
-                    password=zlibrary_account.get("password", ""),
                     remix_userid=zlibrary_account.get("remix_userid", ""),
                     remix_userkey=zlibrary_account.get("remix_userkey", "")
                 )
@@ -86,17 +95,14 @@ class ZLibraryDownloader:
         # 确保目标目录存在
         self.config.target_dir.mkdir(exist_ok=True)
 
-        # 初始化API客户端
-        if self.config.remix_userid and self.config.remix_userkey:
-            self.client = Zlibrary(
-                remix_userid=self.config.remix_userid,
-                remix_userkey=self.config.remix_userkey
-            )
-        else:
-            self.client = Zlibrary(
-                email=self.config.email,
-                password=self.config.password
-            )
+        # 初始化API客户端，只使用remix token认证
+        if not self.config.remix_userid or not self.config.remix_userkey:
+            raise ValueError("缺少必要的认证信息：remix_userid 和 remix_userkey")
+
+        self.client = Zlibrary(
+            remix_userid=self.config.remix_userid,
+            remix_userkey=self.config.remix_userkey
+        )
 
     def read_missing_books(self):
         """读取处理结果文件中未找到的书籍清单"""
