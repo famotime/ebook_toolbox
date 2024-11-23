@@ -252,26 +252,32 @@ def find_result_files(root_dir: Path) -> list[Path]:
     """搜索指定目录及子目录下的所有处理结果文件"""
     return list(root_dir.rglob("处理结果.txt"))
 
-if __name__ == "__main__":
-    root_dir = Path(r"J:\书单\吴军的经典作品私藏")
-    progress_file = root_dir / "download_progress.json"
+def main(root_dir: Path | str, progress_file: Path = None):
+    """
+    主程序入口
 
-    # 加载进度
+    Args:
+        root_dir: 书单根目录路径
+        progress_file: 进度文件路径，默认为根目录下的 download_progress.json
+    """
+    # 确保路径类型正确
+    root_dir = Path(root_dir)
+    if progress_file is None:
+        progress_file = root_dir / "download_progress.json"
+
+    # 加载进度和配置
     stats = DownloadStats.load_progress(progress_file)
-    # 重置本次运行的统计数据
     stats.reset()
-
     config = ZLibraryConfig.load_account_info()
-    final_downloads_left = 0  # 初始化变量
+    final_downloads_left = 0
 
-    # 查找所有处理结果文件
+    # 查找和处理文件
     result_files = find_result_files(root_dir)
-    # 过滤掉已处理的文件
     result_files = [f for f in result_files if str(f) not in stats.processed_file_list]
     stats.total_files = len(result_files)
     print(f"找到 {stats.total_files} 个待处理文件")
 
-    if result_files:  # 如果有文件需要处理
+    if result_files:
         for result_file in result_files:
             print(f"\n开始处理目录: {result_file.parent}")
 
@@ -284,19 +290,17 @@ if __name__ == "__main__":
                 stats.total_books += len(missing_books)
                 downloader.run()
                 stats.processed_files += 1
-                # 保存最后的剩余下载次数
                 final_downloads_left = downloader.downloads_left
                 stats.processed_file_list.append(str(result_file))
             except Exception as e:
                 print(f"处理 {result_file} 时出错: {e}")
                 continue
             finally:
-                # 保存进度
                 stats.save_progress(progress_file)
 
             print(f"完成处理: {result_file}")
             time.sleep(5)
-    else:  # 如果没有文件需要处理，获取当前的下载配额
+    else:
         try:
             temp_client = Zlibrary(
                 remix_userid=config.remix_userid,
@@ -307,13 +311,18 @@ if __name__ == "__main__":
             print(f"获取下载配额失败: {e}")
             final_downloads_left = "未知"
 
-    # 打印最终统计信息
+    # 打印统计信息
     print("\n下载任务完成，统计如下：")
     print(f"本次处理文件数: {stats.processed_files}/{stats.total_files}")
     print(f"本次下载成功: {stats.downloaded_books} 本")
     print(f"本次下载失败: {stats.failed_books} 本")
-    print(f"本次总计图书: {stats.total_books} 本")
-    print(f"已处理文件总数: {len(stats.processed_file_list)}")
+    print(f"本次处理图书: {stats.total_books} 本")
+    print(f"已处理书单文件总数: {len(stats.processed_file_list)}")
     print(f"今日剩余下载配额: {final_downloads_left} 次")
     print(f"开始时间: {stats.start_time}")
     print(f"结束时间: {datetime.now().isoformat()}")
+
+if __name__ == "__main__":
+    # 默认配置
+    default_root_dir = Path(r"J:\书单")
+    main(root_dir=default_root_dir)
