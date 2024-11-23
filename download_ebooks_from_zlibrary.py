@@ -13,7 +13,7 @@
 """
 
 from pathlib import Path
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
 from datetime import datetime
 import time
 from Zlibrary import Zlibrary
@@ -66,8 +66,16 @@ class DownloadStats:
     total_books: int = 0
     downloaded_books: int = 0
     failed_books: int = 0
-    last_processed_file: str = ""
+    processed_file_list: list[str] = field(default_factory=list)  # 记录所有已处理的文件
     start_time: str = ""
+
+    def reset(self):
+        """重置统计数据，但保留已处理文件记录"""
+        processed_files = self.processed_file_list
+        start_time = self.start_time
+        self.__init__()
+        self.processed_file_list = processed_files
+        self.start_time = start_time
 
     def save_progress(self, progress_file: Path):
         """保存进度到文件"""
@@ -91,6 +99,7 @@ class ZLibraryDownloader:
     def __init__(self, config: ZLibraryConfig = None, stats: DownloadStats = None):
         self.config = config or ZLibraryConfig()
         self.stats = stats or DownloadStats()
+        self.downloads_left = 0  # 添加剩余下载次数属性
 
         # 确保目标目录存在
         self.config.target_dir.mkdir(exist_ok=True)
@@ -103,6 +112,8 @@ class ZLibraryDownloader:
             remix_userid=self.config.remix_userid,
             remix_userkey=self.config.remix_userkey
         )
+        # 初始化时获取剩余下载次数
+        self.downloads_left = self.client.getDownloadsLeft()
 
     def read_missing_books(self):
         """读取处理结果文件中未找到的书籍清单"""
@@ -131,6 +142,7 @@ class ZLibraryDownloader:
             results = self.client.search(message=book_name, extensions=["epub"])
             if not results.get("books"):
                 print(f"未找到: 《{book_name}》")
+                self.stats.failed_books += 1  # 搜索无结果计入失败
                 return None
 
             # 获取搜索结果中文件名包含书名的图书
@@ -141,8 +153,8 @@ class ZLibraryDownloader:
                     break
 
             if not found_book:
-                self.stats.failed_books += 1
                 print(f"未找到: 《{book_name}》")
+                self.stats.failed_books += 1  # 未找到匹配的图书计入失败
                 return None
 
             print(f"找到: 《{found_book['title']}》 by {found_book.get('author', '未知作者')}")
@@ -152,13 +164,14 @@ class ZLibraryDownloader:
             print(f"今日剩余下载次数: {downloads_left}")
             if downloads_left <= 0:
                 print("今日下载次数已用完")
+                self.stats.failed_books += 1  # 下载次数用完计入失败
                 return None
 
             # 下载图书
             filename, content = self.client.downloadBook(found_book)
             if not content:
-                self.stats.failed_books += 1
                 print(f"下载失败: 《{book_name}》")
+                self.stats.failed_books += 1  # 下载失败计入失败
                 return None
 
             # 直接保存到目标目录
@@ -166,14 +179,13 @@ class ZLibraryDownloader:
             with file_path.open('wb') as f:
                 f.write(content)
 
-            # 更新结果文件，传入实际的文件名
+            # 更新结果文件
             self.update_result_file(book_name, success=True, filename=filename)
-            self.stats.downloaded_books += 1
             return file_path
 
         except Exception as e:
-            self.stats.failed_books += 1
             print(f"处理图书时出错: {e}")
+            self.stats.failed_books += 1  # 异常情况计入失败
             self.update_result_file(book_name, success=False)
             return None
 
@@ -218,7 +230,8 @@ class ZLibraryDownloader:
     def run(self):
         """运行下载流程"""
         missing_books = self.read_missing_books()
-        print(f"找到 {len(missing_books)} 本待下载的图书")
+        self.stats.total_books = len(missing_books)  # 设置总图书数
+        print(f"找到 {self.stats.total_books} 本待下载的图书")
 
         for book_name in missing_books:
             print(f"\n正在处理: 《{book_name}》")
@@ -226,9 +239,11 @@ class ZLibraryDownloader:
             # 搜索并下载
             file_path = self.search_and_download_book(book_name)
             if not file_path:
-                continue
+                continue  # failed_books已在search_and_download_book中更新
 
             print(f"成功下载到: {file_path}")
+            # 只在成功下载时增加下载计数，失败计数在search_and_download_book中处理
+            self.stats.downloaded_books += 1
 
             # 添加延时避免请求过于频繁
             time.sleep(2)
@@ -238,52 +253,67 @@ def find_result_files(root_dir: Path) -> list[Path]:
     return list(root_dir.rglob("处理结果.txt"))
 
 if __name__ == "__main__":
-    root_dir = Path("J:/书单")
+    root_dir = Path(r"J:\书单\吴军的经典作品私藏")
     progress_file = root_dir / "download_progress.json"
 
     # 加载进度
     stats = DownloadStats.load_progress(progress_file)
+    # 重置本次运行的统计数据
+    stats.reset()
+
     config = ZLibraryConfig.load_account_info()
+    final_downloads_left = 0  # 初始化变量
 
     # 查找所有处理结果文件
     result_files = find_result_files(root_dir)
+    # 过滤掉已处理的文件
+    result_files = [f for f in result_files if str(f) not in stats.processed_file_list]
     stats.total_files = len(result_files)
-    print(f"找到 {stats.total_files} 个处理结果文件")
+    print(f"找到 {stats.total_files} 个待处理文件")
 
-    # 从上次处理的文件继续
-    if stats.last_processed_file:
-        start_index = next((i for i, f in enumerate(result_files)
-                          if str(f) == stats.last_processed_file), 0)
-        result_files = result_files[start_index:]
+    if result_files:  # 如果有文件需要处理
+        for result_file in result_files:
+            print(f"\n开始处理目录: {result_file.parent}")
 
-    for result_file in result_files:
-        print(f"\n开始处理目录: {result_file.parent}")
-        stats.last_processed_file = str(result_file)
+            config.result_file = result_file
+            config.target_dir = result_file.parent
 
-        config.result_file = result_file
-        config.target_dir = result_file.parent
+            try:
+                downloader = ZLibraryDownloader(config, stats)
+                missing_books = downloader.read_missing_books()
+                stats.total_books += len(missing_books)
+                downloader.run()
+                stats.processed_files += 1
+                # 保存最后的剩余下载次数
+                final_downloads_left = downloader.downloads_left
+                stats.processed_file_list.append(str(result_file))
+            except Exception as e:
+                print(f"处理 {result_file} 时出错: {e}")
+                continue
+            finally:
+                # 保存进度
+                stats.save_progress(progress_file)
 
+            print(f"完成处理: {result_file}")
+            time.sleep(5)
+    else:  # 如果没有文件需要处理，获取当前的下载配额
         try:
-            downloader = ZLibraryDownloader(config, stats)
-            missing_books = downloader.read_missing_books()
-            stats.total_books += len(missing_books)
-            downloader.run()
-            stats.processed_files += 1
+            temp_client = Zlibrary(
+                remix_userid=config.remix_userid,
+                remix_userkey=config.remix_userkey
+            )
+            final_downloads_left = temp_client.getDownloadsLeft()
         except Exception as e:
-            print(f"处理 {result_file} 时出错: {e}")
-            continue
-        finally:
-            # 保存进度
-            stats.save_progress(progress_file)
-
-        print(f"完成处理: {result_file}")
-        time.sleep(5)
+            print(f"获取下载配额失败: {e}")
+            final_downloads_left = "未知"
 
     # 打印最终统计信息
     print("\n下载任务完成，统计如下：")
-    print(f"处理文件数: {stats.processed_files}/{stats.total_files}")
-    print(f"下载成功: {stats.downloaded_books} 本")
-    print(f"下载失败: {stats.failed_books} 本")
-    print(f"总计图书: {stats.total_books} 本")
+    print(f"本次处理文件数: {stats.processed_files}/{stats.total_files}")
+    print(f"本次下载成功: {stats.downloaded_books} 本")
+    print(f"本次下载失败: {stats.failed_books} 本")
+    print(f"本次总计图书: {stats.total_books} 本")
+    print(f"已处理文件总数: {len(stats.processed_file_list)}")
+    print(f"今日剩余下载配额: {final_downloads_left} 次")
     print(f"开始时间: {stats.start_time}")
     print(f"结束时间: {datetime.now().isoformat()}")
