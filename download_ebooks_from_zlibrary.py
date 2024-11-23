@@ -13,7 +13,8 @@
 """
 
 from pathlib import Path
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict
+from datetime import datetime
 import time
 from Zlibrary import Zlibrary
 import json
@@ -49,9 +50,38 @@ class ZLibraryConfig:
             print(f"读取账号配置文件失败: {e}")
             return cls()
 
+@dataclass
+class DownloadStats:
+    total_files: int = 0
+    processed_files: int = 0
+    total_books: int = 0
+    downloaded_books: int = 0
+    failed_books: int = 0
+    last_processed_file: str = ""
+    start_time: str = ""
+
+    def save_progress(self, progress_file: Path):
+        """保存进度到文件"""
+        with progress_file.open('w', encoding='utf-8') as f:
+            json.dump(asdict(self), f, ensure_ascii=False, indent=2)
+
+    @classmethod
+    def load_progress(cls, progress_file: Path):
+        """从文件加载进度"""
+        if not progress_file.exists():
+            return cls(start_time=datetime.now().isoformat())
+        try:
+            with progress_file.open('r', encoding='utf-8') as f:
+                data = json.load(f)
+                return cls(**data)
+        except Exception as e:
+            print(f"加载进度文件失败: {e}")
+            return cls(start_time=datetime.now().isoformat())
+
 class ZLibraryDownloader:
-    def __init__(self, config: ZLibraryConfig = None):
+    def __init__(self, config: ZLibraryConfig = None, stats: DownloadStats = None):
         self.config = config or ZLibraryConfig()
+        self.stats = stats or DownloadStats()
 
         # 确保目标目录存在
         self.config.target_dir.mkdir(exist_ok=True)
@@ -105,6 +135,7 @@ class ZLibraryDownloader:
                     break
 
             if not found_book:
+                self.stats.failed_books += 1
                 print(f"未找到: 《{book_name}》")
                 return None
 
@@ -120,8 +151,8 @@ class ZLibraryDownloader:
             # 下载图书
             filename, content = self.client.downloadBook(found_book)
             if not content:
+                self.stats.failed_books += 1
                 print(f"下载失败: 《{book_name}》")
-                self.update_result_file(book_name, success=False)
                 return None
 
             # 直接保存到目标目录
@@ -131,9 +162,11 @@ class ZLibraryDownloader:
 
             # 更新结果文件，传入实际的文件名
             self.update_result_file(book_name, success=True, filename=filename)
+            self.stats.downloaded_books += 1
             return file_path
 
         except Exception as e:
+            self.stats.failed_books += 1
             print(f"处理图书时出错: {e}")
             self.update_result_file(book_name, success=False)
             return None
@@ -199,32 +232,52 @@ def find_result_files(root_dir: Path) -> list[Path]:
     return list(root_dir.rglob("处理结果.txt"))
 
 if __name__ == "__main__":
-    # 指定要搜索的根目录
     root_dir = Path("J:/书单")
+    progress_file = root_dir / "download_progress.json"
 
-    # 从配置文件加载账号信息
+    # 加载进度
+    stats = DownloadStats.load_progress(progress_file)
     config = ZLibraryConfig.load_account_info()
 
     # 查找所有处理结果文件
     result_files = find_result_files(root_dir)
-    print(f"找到 {len(result_files)} 个处理结果文件")
+    stats.total_files = len(result_files)
+    print(f"找到 {stats.total_files} 个处理结果文件")
 
-    # 逐个处理每个结果文件
+    # 从上次处理的文件继续
+    if stats.last_processed_file:
+        start_index = next((i for i, f in enumerate(result_files)
+                          if str(f) == stats.last_processed_file), 0)
+        result_files = result_files[start_index:]
+
     for result_file in result_files:
         print(f"\n开始处理目录: {result_file.parent}")
+        stats.last_processed_file = str(result_file)
 
-        # 更新配置
         config.result_file = result_file
         config.target_dir = result_file.parent
 
         try:
-            # 创建下载器并运行
-            downloader = ZLibraryDownloader(config)
+            downloader = ZLibraryDownloader(config, stats)
+            missing_books = downloader.read_missing_books()
+            stats.total_books += len(missing_books)
             downloader.run()
+            stats.processed_files += 1
         except Exception as e:
             print(f"处理 {result_file} 时出错: {e}")
             continue
+        finally:
+            # 保存进度
+            stats.save_progress(progress_file)
 
         print(f"完成处理: {result_file}")
-        # 在处理不同目录之间添加较长的延时
         time.sleep(5)
+
+    # 打印最终统计信息
+    print("\n下载任务完成，统计如下：")
+    print(f"处理文件数: {stats.processed_files}/{stats.total_files}")
+    print(f"下载成功: {stats.downloaded_books} 本")
+    print(f"下载失败: {stats.failed_books} 本")
+    print(f"总计图书: {stats.total_books} 本")
+    print(f"开始时间: {stats.start_time}")
+    print(f"结束时间: {datetime.now().isoformat()}")
