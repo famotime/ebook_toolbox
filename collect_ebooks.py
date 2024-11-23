@@ -1,5 +1,5 @@
 """
-在本地硬盘上查找书单中的所有电子书，并复制到一个新的目录中。
+在本地硬盘上查找书单中的电子书，并复制到一个新目录中。
 
 功能说明：
 1. 支持两种输入方式：
@@ -8,18 +8,27 @@
 2. 清单格式要求：
    - 必须包含使用《》包裹的书名
    - 使用剪贴板时，第一行作为输出目录名
-3. 搜索规则：
+3. 书名处理规则：
+   - 自动清理HTML标签（如 <span>、<br> 等）
+   - 自动清理HTML实体字符（如 &nbsp;）
+   - 自动清理特殊字符（如 *[]【】{}『』「」等）
+   - 自动清理多余空格
+4. 搜索规则：
    - 文件名必须以搜索词开头（忽略标点符号和大小写）
    - 支持中文、英文和数字
    - 文件类型优先级：epub > pdf > txt
    - 同类型文件优先选择更大的文件，大小相同则选择更新的文件
-4. 处理流程：
+5. 输出目录结构：
+   - 在统一的父目录下创建子文件夹
+   - 每个书单对应一个独立的子文件夹
+   - 子文件夹包含处理结果和日志文件
+6. 处理流程：
    - 首次运行时生成搜索目录下的文件列表（_file_list.txt）
    - 跳过已经存在于输出目录中的文件
    - 生成两个结果文件：
      * 处理结果.txt：简要统计和文件列表
      * 处理日志.txt：详细的处理记录和完整路径
-5. 输出报告：
+7. 输出报告：
    - 总文件数统计
    - 已存在文件数
    - 新找到文件数
@@ -31,6 +40,7 @@
 - 自动跳过系统目录和特殊文件夹的扫描
 - 使用文件缓存提升搜索性能
 - 监控模式下，粘贴不包含《》的内容可退出程序
+- 支持的书单文件格式：txt、md、html
 """
 
 from pathlib import Path
@@ -38,6 +48,7 @@ import shutil
 import re
 import time
 import pyperclip
+
 
 def generate_file_list(search_dir):
     """
@@ -141,7 +152,7 @@ def search_file(filename, search_dir):
 
         # 如果在当前优先级找到匹配，就不继续搜索次优先级的文件
         if matches:
-            # 在相同后缀名下，优先选择更大的文件，如果大小相同则选择更新的文件
+            # 在相同后缀名下优先选择更大的文件，如果大小相同则选择更新的文件
             return max(matches, key=lambda x: (x[2], x[3]))[0]
 
     print(f"未找到：{filename}")
@@ -156,7 +167,8 @@ def check_file_list_update(search_dir):
         bool: 是否需要更新
     """
     search_path = Path(search_dir)
-    file_list_path = search_path / '_file_list.txt'
+    # 文件名示例: _file_list_20241201.txt
+    file_list_path = search_path / f'_file_list.txt'
 
     # 如果文件列表不存在或为空，需要生成
     if not file_list_path.exists() or file_list_path.stat().st_size == 0:
@@ -174,6 +186,7 @@ def check_file_list_update(search_dir):
 def extract_book_names(content: str) -> list[str]:
     """
     从整个文本内容中提取所有使用《》包裹的书名，并去重
+    会清理书名中的HTML标签、HTML实体字符、特殊字符和多余空格
 
     Args:
         content: 输入的文本内容
@@ -183,11 +196,35 @@ def extract_book_names(content: str) -> list[str]:
     if not content or '《' not in content:
         return []
 
+    # 先提取所有《》中的内容
     pattern = r'《([^》]+)》'
     matches = re.findall(pattern, content)
 
-    # 使用集合去重后转回列表
-    return list(dict.fromkeys(matches))
+    # 清理HTML标签的正则表达式
+    html_pattern = r'<[^>]+>'
+
+    # 清理HTML实体字符的正则表达式
+    html_entity_pattern = r'&[a-zA-Z]+;'
+
+    # 要清理的特殊字符（可以根据需要添加更多）
+    special_chars = r'[*\[\]【】\{\}『』「」\\\|\.\+#@\$%\^&\s]'
+
+    # 清理每个书名中的HTML标签、特殊字符和多余空格
+    cleaned_names = []
+    for name in matches:
+        # 1. 移除HTML标签
+        cleaned = re.sub(html_pattern, '', name)
+        # 2. 移除HTML实体字符（如&nbsp;）
+        cleaned = re.sub(html_entity_pattern, ' ', cleaned)
+        # 3. 移除特殊字符
+        cleaned = re.sub(special_chars, ' ', cleaned)
+        # 4. 清理多余空格并去除首尾空格
+        cleaned = ' '.join(cleaned.split())
+        if cleaned:  # 确保清理后的书名不为空
+            cleaned_names.append(cleaned)
+
+    # 使用字典去重并保持顺序
+    return list(dict.fromkeys(cleaned_names))
 
 def clean_dirname(name: str) -> str:
     """
@@ -264,7 +301,8 @@ def process_book_list(list_file, search_dir, from_clipboard=False):
             content = f.read()
 
         book_names = extract_book_names(content)
-        output_dir = list_path.parent / list_path.stem
+        # 修改输出目录为统一的父目录下的子目录
+        output_dir = Path(BOOKS_OUTPUT_DIR) / list_path.stem
 
     # 创建输出目录
     output_dir.mkdir(exist_ok=True)
@@ -392,7 +430,7 @@ def monitor_clipboard(search_dir):
         search_dir: 搜索目录路径
     """
     last_content = ""
-    print("开始监控剪贴板，粘贴包含《》的内容开始处理，粘贴不包含《》的内容结束程序...")
+    print("开始监控剪贴板，粘贴包含《》内容开始处理，粘贴不包含《》的内容结束程序...")
 
     while True:
         try:
@@ -419,18 +457,63 @@ def monitor_clipboard(search_dir):
             print(f"\n发生错误: {e}")
             continue
 
-# 修改主函数部分
+def process_book_list_directory(list_dir, search_dir):
+    """
+    处理指定目录下的所有书单文件
+    Args:
+        list_dir: 书单文件所在目录
+        search_dir: 搜索目录路径
+    """
+    list_path = Path(list_dir)
+    if not list_path.exists():
+        raise FileNotFoundError(f"书单目录不存在: {list_dir}")
+
+    # 支持的文件类型
+    supported_extensions = {'.txt', '.md', '.html', '.htm'}
+
+    # 获取所有支持的文件
+    book_list_files = []
+    for ext in supported_extensions:
+        book_list_files.extend(list_path.glob(f'*{ext}'))
+
+    if not book_list_files:
+        print(f"在 {list_dir} 中未找到任何书单文件")
+        return
+
+    print(f"找到 {len(book_list_files)} 个书单文件")
+
+    # 处理每个书单文件
+    for file_path in book_list_files:
+        print(f"\n处理书单文件: {file_path.name}")
+        process_book_list(file_path, search_dir, from_clipboard=False)
+
+
 if __name__ == "__main__":
-    # 搜索目录路径
-    search_dir = r"J:"
+    search_dir = r"J:"    # 本地电子书库路径
+    list_dir = r"D:\Python_Work\Wiznotes_tools\wiznotes\兴趣爱好\读书观影\书单"    # 书单文件所在目录
+    BOOKS_OUTPUT_DIR = Path(r"J:\书单")  # 统一的书单输出目录
 
     try:
-        # 检查是否需要更新文件列表
+        # 确保输出目录存在
+        BOOKS_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+        # 检查是否需要更新文件索引列表
         if check_file_list_update(search_dir):
             generate_file_list(search_dir)
 
-        # 启动剪贴板监控
-        monitor_clipboard(search_dir)
+        print("请选择运行模式：")
+        print("1. 剪贴板监控模式")
+        print("2. 批量处理书单文件")
+        mode = input("请输入模式编号(1/2): ").strip()
+
+        if mode == "1":
+            # 启动剪贴板监控，使用统一的输出目录
+            monitor_clipboard(search_dir)
+        elif mode == "2":
+            # 处理书单文件
+            process_book_list_directory(list_dir, search_dir)
+        else:
+            print("无效的模式选择！")
 
     except Exception as e:
         print(f"处理失败: {e}")
