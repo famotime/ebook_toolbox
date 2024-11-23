@@ -228,7 +228,7 @@ def extract_book_names(content: str) -> list[str]:
 
 def clean_dirname(name: str) -> str:
     """
-    清理目录名中的非法字符
+    清理目录名中的非法字符，并限制长度
     Args:
         name: 原始目录名
     Returns:
@@ -236,12 +236,24 @@ def clean_dirname(name: str) -> str:
     """
     # Windows下文件名不能包含这些字符: \ / : * ? " < > |
     invalid_chars = r'\/:*?"<>|'
+
+    # 移除省略号和常见标点符号
+    name = re.sub(r'\.{3,}|…|。', '', name)
+
     # 替换非法字符为空格
     for char in invalid_chars:
-        name = name.replace(char, ' ')
+        name = name.replace(char, '_')
+
     # 清理多余的空格
     name = ' '.join(name.split())
-    return name.strip()
+
+    # 截取前100个字符（可以根据需要调整长度）
+    name = name[:100].strip()
+
+    # 如果末尾是空格或点号，去除它们
+    name = name.rstrip('. ')
+
+    return name if name else "新建书单"
 
 def get_books_from_clipboard():
     """
@@ -290,7 +302,11 @@ def process_book_list(list_file, search_dir, from_clipboard=False):
         if not dir_name or not book_names:
             return
 
-        output_dir = parent_dir / dir_name
+        # 修改：根据书籍数量决定输出目录
+        if len(book_names) <= 1:
+            output_dir = BOOKS_OUTPUT_DIR / "单本好书"
+        else:
+            output_dir = parent_dir / dir_name
     else:
         list_path = Path(list_file)
         if not list_path.exists():
@@ -301,8 +317,11 @@ def process_book_list(list_file, search_dir, from_clipboard=False):
             content = f.read()
 
         book_names = extract_book_names(content)
-        # 修改输出目录为统一的父目录下的子目录
-        output_dir = Path(BOOKS_OUTPUT_DIR) / list_path.stem
+        # 修改：根据书籍数量决定输出目录
+        if len(book_names) <= 1:
+            output_dir = BOOKS_OUTPUT_DIR / "单本好书"
+        else:
+            output_dir = BOOKS_OUTPUT_DIR / list_path.stem
 
     # 创建输出目录
     output_dir.mkdir(exist_ok=True)
@@ -468,6 +487,15 @@ def process_book_list_directory(list_dir, search_dir):
     if not list_path.exists():
         raise FileNotFoundError(f"书单目录不存在: {list_dir}")
 
+    # 进度记录文件
+    progress_file = BOOKS_OUTPUT_DIR / "本地书整理_处理进度.txt"
+    processed_files = set()
+
+    # 读取已处理的文件记录
+    if progress_file.exists():
+        with progress_file.open('r', encoding='utf-8') as f:
+            processed_files = {line.strip() for line in f if line.strip()}
+
     # 支持的文件类型
     supported_extensions = {'.txt', '.md', '.html', '.htm'}
 
@@ -480,12 +508,43 @@ def process_book_list_directory(list_dir, search_dir):
         print(f"在 {list_dir} 中未找到任何书单文件")
         return
 
-    print(f"找到 {len(book_list_files)} 个书单文件")
+    total_files = len(book_list_files)
+    print(f"找到 {total_files} 个书单文件")
+    print(f"已处理 {len(processed_files)} 个文件")
 
-    # 处理每个书单文件
-    for file_path in book_list_files:
-        print(f"\n处理书单文件: {file_path.name}")
-        process_book_list(file_path, search_dir, from_clipboard=False)
+    try:
+        # 处理每个书单文件
+        for i, file_path in enumerate(book_list_files, 1):
+            if str(file_path) in processed_files:
+                print(f"\n[{i}/{total_files}] 跳过已处理的文件: {file_path.name}")
+                continue
+
+            try:
+                print(f"\n[{i}/{total_files}] 处理书单文件: {file_path.name}")
+                process_book_list(file_path, search_dir, from_clipboard=False)
+
+                # 记录处理成功的文件
+                with progress_file.open('a', encoding='utf-8') as f:
+                    f.write(f"{file_path}\n")
+
+            except Exception as e:
+                print(f"处理失败: {e}")
+                # 记录错误到日志文件
+                error_log = BOOKS_OUTPUT_DIR / "_处理错误.txt"
+                with error_log.open('a', encoding='utf-8') as f:
+                    f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} - {file_path.name}: {str(e)}\n")
+                # 发生错误时退出处理
+                print("由于发生错误，停止处理后续文件")
+                break
+
+    except KeyboardInterrupt:
+        print("\n用户中断处理")
+
+    finally:
+        # 打印最终处理统计
+        with progress_file.open('r', encoding='utf-8') as f:
+            final_processed = len(set(line.strip() for line in f if line.strip()))
+        print(f"\n处理完成！总共处理了 {final_processed}/{total_files} 个文件")
 
 
 if __name__ == "__main__":
@@ -494,8 +553,9 @@ if __name__ == "__main__":
     BOOKS_OUTPUT_DIR = Path(r"J:\书单")  # 统一的书单输出目录
 
     try:
-        # 确保输出目录存在
+        # 确保输出目录和单本好书目录都存在
         BOOKS_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+        (BOOKS_OUTPUT_DIR / "单本好书").mkdir(exist_ok=True)
 
         # 检查是否需要更新文件索引列表
         if check_file_list_update(search_dir):
