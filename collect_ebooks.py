@@ -273,6 +273,19 @@ def process_book_list(list_file, search_dir, from_clipboard=False):
     result_file = output_dir / "处理结果.txt"
     log_file = output_dir / "处理日志.txt"
 
+    # 读取已有的处理结果
+    previously_copied = set()
+    if result_file.exists():
+        with result_file.open('r', encoding='utf-8') as f:
+            content = f.read()
+            # 提取"已找到并复制的文件"部分的书名
+            if "已找到并复制的文件：" in content:
+                copied_section = content.split("已找到并复制的文件：")[1].split("\n\n")[0]
+                for line in copied_section.strip().split("\n"):
+                    if line.startswith("- 《"):
+                        book = line[3:-1]  # 去掉"- 《"和"》"
+                        previously_copied.add(book)
+
     # 获取输出目录中已存在的文件
     existing_files = {clean_filename(f.stem): f.stem for f in output_dir.glob('*.*')}
 
@@ -290,6 +303,14 @@ def process_book_list(list_file, search_dir, from_clipboard=False):
     results = []
     log_results = []  # 新增：用于记录详细日志
     for book_name in book_names:
+        # 如果书已经在之前的处理结果中，跳过处理
+        if book_name in previously_copied:
+            stats['existing'] += 1
+            result = f"《{book_name}》: 跳过（之前已处理）"
+            results.append(result)
+            log_results.append(result)
+            continue
+
         clean_name = clean_filename(book_name)
 
         if clean_name in existing_files:
@@ -317,7 +338,18 @@ def process_book_list(list_file, search_dir, from_clipboard=False):
                 error_msg = f"《{book_name}》: 复制失败 - 源文件：{file_path}, 错误：{str(e)}"
                 log_results.append(error_msg)
 
-    # 将结果写入结果文件（简化版）
+    # 读取已有的处理结果内容
+    existing_content = ""
+    existing_copied_files = ""
+    if result_file.exists():
+        with result_file.open('r', encoding='utf-8') as f:
+            existing_content = f.read()
+            if "已找到并复制的文件：" in existing_content:
+                parts = existing_content.split("已找到并复制的文件：")
+                if len(parts) > 1:
+                    existing_copied_files = parts[1].split("\n\n")[0].strip()
+
+    # 将结果写入结果文件
     with result_file.open('w', encoding='utf-8') as f:
         f.write("处理总结：\n")
         f.write(f"总共需要处理的文件数：{stats['total']}\n")
@@ -326,12 +358,15 @@ def process_book_list(list_file, search_dir, from_clipboard=False):
         f.write(f"成功复制的文件数：{stats['copied']}\n")
         f.write(f"未找到的文件数：{len(stats['not_found'])}\n\n")
 
-        if stats['copied'] > 0:
-            f.write("已找到并复制的文件：\n")
-            for result in results:
-                if "未找到" not in result and "跳过" not in result:
-                    f.write(f"{result}\n")
-            f.write("\n")
+        f.write("已找到并复制的文件：\n")
+        # 首先写入原有的已复制文件列表
+        if existing_copied_files:
+            f.write(existing_copied_files + "\n")
+        # 然后写入新复制的文件
+        for result in results:
+            if "未找到" not in result and "跳过" not in result:
+                f.write(f"{result}\n")
+        f.write("\n")
 
         if stats['not_found']:
             f.write("未找到的文件清单：\n")
@@ -368,8 +403,8 @@ def monitor_clipboard(search_dir):
 
                 # 检查是否包含书名标记
                 if "《" in current_content and "》" in current_content:
-                    print("\n检测���新的书单，开始处理...")
-                    process_book_list(r"J:\书单", search_dir, from_clipboard=True)
+                    print("\n检测到新的书单，开始处理...")
+                    process_book_list(Path(search_dir) / "书单", search_dir, from_clipboard=True)
                     print("\n继续监控剪贴板...")
                 else:
                     print("\n检测到不包含书名的内容，退出程序")
