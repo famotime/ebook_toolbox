@@ -28,13 +28,6 @@
    - 生成两个结果文件：
      * 处理结果.txt：简要统计和文件列表
      * 处理日志.txt：详细的处理记录和完整路径
-7. 输出报告：
-   - 总文件数统计
-   - 已存在文件数
-   - 新找到文件数
-   - 成功复制数
-   - 未找到文件清单
-   - 复制失败文件列表
 
 注意事项：
 - 自动跳过系统目录和特殊文件夹的扫描
@@ -389,7 +382,7 @@ def process_book_list(list_file, search_dir, from_clipboard=False):
                 # 结果文件只记录文件名
                 results.append(f"- 《{book_name}》")
                 # 日志文件记录完整路径
-                log_results.append(f"《{book_name}》: 已复制 {file_path} -> {output_dir}")
+                log_results.append(f"《{book_name}》: 已复制 {file_path}")
             except Exception as e:
                 stats['copy_failed'].append((book_name, str(e)))
                 error_msg = f"《{book_name}》: 复制失败 - 源文件：{file_path}, 错误：{str(e)}"
