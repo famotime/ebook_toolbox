@@ -39,11 +39,12 @@ import time
 import pyperclip
 
 
-def generate_file_list(search_dir):
+def generate_file_list(search_dir, folders_to_update=None):
     """
     生成目录下所有文件的路径列表文件
     Args:
         search_dir: 搜索目录路径
+        folders_to_update: 需要更新的文件夹列表，如果为None则更新所有目录
     Returns:
         文件列表文件的路径
     """
@@ -51,43 +52,79 @@ def generate_file_list(search_dir):
     file_list_path = search_path / '_file_list.txt'
 
     print(f"正在生成文件列表：{file_list_path}")
+    if folders_to_update:
+        print(f"仅更新以下目录: {', '.join(folders_to_update)}")
+
+    # 如果文件列表已存在且指定了部分更新，先读取现有内容
+    existing_files = {}
+    if file_list_path.exists() and folders_to_update:
+        with file_list_path.open('r', encoding='utf-8') as f:
+            for line in f:
+                try:
+                    path_str, size, mtime = line.strip().split('|')
+                    path = Path(path_str)
+                    # 如果文件不在需要更新的目录中，保留原记录
+                    if not any(folder.lower() in str(path).lower() for folder in folders_to_update):
+                        existing_files[str(path)] = f"{path}|{size}|{mtime}"
+                except:
+                    continue
 
     # 收集所有epub、pdf和txt文件
     files = []
     for ext in ['.epub', '.pdf', '.txt']:
         try:
-            for p in search_path.rglob(f'*{ext}'):
-                try:
-                    # 跳过系统目录和无法访问的文件
-                    # 要跳过的系统目录和文件名列表
-                    SKIP_DIRS = {
-                        'System Volume Information',
-                        '$Recycle.Bin',
-                        '$RECYCLE.BIN',
-                        'Config.Msi',
-                        'Recovery',
-                        'Documents and Settings',
-                        'PerfLogs',
-                        'Program Files',
-                        'Program Files (x86)',
-                        'Windows'
-                    }
-                    if p.is_file() and not any(x.startswith('$') or x in SKIP_DIRS for x in p.parts):
-                        # 添加文件大小和修改时间信息
-                        stat = p.stat()
-                        files.append(f"{p}|{stat.st_size}|{stat.st_mtime}")
-                except (PermissionError, OSError):
-                    continue
+            if folders_to_update:
+                # 只搜索指定目录
+                for folder in folders_to_update:
+                    folder_path = search_path / folder
+                    if folder_path.exists():
+                        for p in folder_path.rglob(f'*{ext}'):
+                            try:
+                                if _is_valid_file(p):
+                                    stat = p.stat()
+                                    files.append(f"{p}|{stat.st_size}|{stat.st_mtime}")
+                            except (PermissionError, OSError):
+                                continue
+            else:
+                # 搜索所有目录
+                for p in search_path.rglob(f'*{ext}'):
+                    try:
+                        if _is_valid_file(p):
+                            stat = p.stat()
+                            files.append(f"{p}|{stat.st_size}|{stat.st_mtime}")
+                    except (PermissionError, OSError):
+                        continue
         except Exception as e:
             print(f"搜索{ext}文件时出错: {e}")
             continue
 
+    # 合并现有文件记录和新扫描的文件
+    all_files = list(existing_files.values()) + files
+
     # 将文件列表写入文件
     with file_list_path.open('w', encoding='utf-8') as f:
-        f.write('\n'.join(files))
+        f.write('\n'.join(all_files))
 
-    print(f"文件列表生成完成，共 {len(files)} 个文件")
+    print(f"文件列表生成完成，共 {len(all_files)} 个文件")
     return file_list_path
+
+def _is_valid_file(path):
+    """
+    检查文件是否有效（不在系统目录中）
+    """
+    SKIP_DIRS = {
+        'System Volume Information',
+        '$Recycle.Bin',
+        '$RECYCLE.BIN',
+        'Config.Msi',
+        'Recovery',
+        'Documents and Settings',
+        'PerfLogs',
+        'Program Files',
+        'Program Files (x86)',
+        'Windows'
+    }
+    return path.is_file() and not any(x.startswith('$') or x in SKIP_DIRS for x in path.parts)
 
 def clean_filename(filename):
     """
@@ -97,12 +134,13 @@ def clean_filename(filename):
     cleaned = re.sub(r'[^\u4e00-\u9fff\w]', '', filename)
     return cleaned.lower()  # 转换为小写
 
-def search_file(filename, search_dir):
+def search_file(filename, search_dir, folders_to_update=None):
     """
     在文件列表中搜索文件
     Args:
         filename: 要搜索的文件名
         search_dir: 搜索目录路径
+        folders_to_update: 需要更新的文件夹列表
     """
     search_path = Path(search_dir)
     file_list_path = search_path / '_file_list.txt'
@@ -112,12 +150,14 @@ def search_file(filename, search_dir):
 
     print(f"正在搜索：{filename}（清理后的搜索词：{name}）")
 
-    # 如果文件列表不存在或为空，则生成
-    if not file_list_path.exists() or file_list_path.stat().st_size == 0:
-        file_list_path = generate_file_list(search_dir)
-
-    # 修改缓存结构以包含文件信息
+    # 修改：仅在首次搜索时生成或更新文件列表
     if not hasattr(search_file, '_file_cache'):
+        # 如果文件列表不存在 或为空 或需要部分更新文件夹索引，则生成
+        if not file_list_path.exists() or file_list_path.stat().st_size == 0 or folders_to_update:
+            print(f"正在生成文件索引列表，耗时较长，请等待：{file_list_path}")
+            file_list_path = generate_file_list(search_dir, folders_to_update)
+
+        # 初始化文件缓存
         search_file._file_cache = {'.epub': [], '.pdf': [], '.txt': []}
         with file_list_path.open('r', encoding='utf-8') as f:
             for line in f:
@@ -541,6 +581,9 @@ if __name__ == "__main__":
     list_dir = r"D:\Python_Work\Wiznotes_tools\wiznotes\兴趣爱好\读书观影\书单"    # 书单文件所在目录
     BOOKS_OUTPUT_DIR = Path(r"J:\书单")  # 统一的书单输出目录
 
+    # 仅更新指定文件夹的文件索引（可选）
+    # folders_to_update = ["J:\书单", ]
+
     try:
         # 确保输出目录和单本好书目录都存在
         BOOKS_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -548,7 +591,7 @@ if __name__ == "__main__":
 
         # 检查是否需要更新文件索引列表
         if check_file_list_update(search_dir):
-            generate_file_list(search_dir)
+            generate_file_list(search_dir, folders_to_update)  # 传入folders_to_update参数
 
         print("请选择运行模式：")
         print("1. 剪贴板监控模式")
