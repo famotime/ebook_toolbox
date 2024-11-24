@@ -71,7 +71,7 @@ def clean_book_filenames(directory):
 
 if __name__ == '__main__':
     # 获取当前目录
-    current_dir = Path(r"J:\书单\吴军的经典作品私藏")
+    current_dir = Path(r"J:\zlibrary")
 
     # 执行清理并获取统计结果
     stats = clean_book_filenames(current_dir)

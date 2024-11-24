@@ -61,13 +61,13 @@ class ZLibraryConfig:
 
 @dataclass
 class DownloadStats:
-    total_files: int = 0
-    processed_files: int = 0
-    total_books: int = 0
-    downloaded_books: int = 0
-    failed_books: int = 0
-    processed_file_list: list[str] = field(default_factory=list)  # 记录所有已处理的文件
-    start_time: str = ""
+    total_files: int = 0  # 需要处理的结果文件总数
+    processed_files: int = 0  # 已处理的结果文件数
+    total_books: int = 0  # 所有结果文件中的图书总数
+    downloaded_books: int = 0  # 成功下载的图书数
+    failed_books: int = 0  # 下载失败的图书数
+    processed_file_list: list[str] = field(default_factory=list)  # 记录所有已处理的结果文件路径
+    start_time: str = ""  # 开始处理的时间戳
 
     def reset(self):
         """重置统计数据，但保留已处理文件记录"""
@@ -313,11 +313,9 @@ def main(root_dir: Path | str, progress_file: Path = None):
 
     # 打印统计信息
     print("\n下载任务完成，统计如下：")
-    print(f"本次处理文件数: {stats.processed_files}/{stats.total_files}")
+    print(f"本次处理书单数: {stats.processed_files}/{stats.total_files}")
     print(f"本次下载成功: {stats.downloaded_books} 本")
     print(f"本次下载失败: {stats.failed_books} 本")
-    print(f"本次处理图书: {stats.total_books} 本")
-    print(f"已处理书单文件总数: {len(stats.processed_file_list)}")
     print(f"今日剩余下载配额: {final_downloads_left} 次")
     print(f"开始时间: {stats.start_time}")
     print(f"结束时间: {datetime.now().isoformat()}")
