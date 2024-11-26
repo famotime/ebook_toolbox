@@ -14,6 +14,9 @@
 3. `pull_md_images_to_local.py`: Markdown文档图片本地化工具
 4. `doc2md.py`: Word文档转Markdown工具
 
+书单合集：
+
+1000+书单合集_famotime.rar：本压缩包包含了我多年积攒的1000+书单，不知道读什么时可以按单索书。也可以从这个书单开始构建你的电子书库。
 
 ## 主要工具说明
 
@@ -45,12 +48,17 @@
 - 自动重试和错误处理
 - 生成下载报告和日志
 
-注意下载前须配置Zlibrary帐号信息：
+注意下载前须在`../account/web_accounts.json`（account是本代码文件夹的同级目录）中配置Zlibrary帐号信息：
 
-```python
-ZLIBRARY_EMAIL = "your_email@example.com"
-ZLIBRARY_PASSWORD = "your_password"
+```json
+{
+    "zlibrary": {"email": "your_email@example.com", "password": "your_password"}
+}
 ```
+
+代码库中附带了一个示例目录和文件，你需要把它拷贝到父目录，并在web_account.json中修改你的账号信息。当然，你也可以不用这么麻烦，直接把账号密码信息写在源代码里。
+
+Z-Library的普通账号每天下载配额是10本书，如果不够用，可以考虑购买VIP账号。
 
 ## 辅助工具说明
 
@@ -69,22 +77,21 @@ ZLIBRARY_PASSWORD = "your_password"
    # 处理后的文件名
    鲁迅全集 [朝花夕拾_野草_故事新编_华盖集].epub
 
-   # 如果目录过长，会生成
+   # 如果目录过长，会截断
    鲁迅全集 [朝花夕拾_野草...].epub
-   鲁迅全集 [朝花夕拾_野草...].txt  # 包含完整目录信息
    ```
 
 **书名清理工具 (clean_booknames.py)**
 
-这个脚本用于清理和标准化书名格式。
+用于清理和标准化书名格式。
 
 **Markdown图片本地化工具 (pull_md_images_to_local.py)**
 
-这个脚本用于处理Markdown文档中的远程图片链接，将图片下载到本地并更新链接。
+用于处理Markdown文档中的远程图片链接，将图片下载到本地并更新链接。
 
 **Word转Markdown工具 (doc2md.py)**
 
-这个脚本用于将Word文档(.doc/.docx)转换/合并为Markdown文档。
+用于将Word文档(.doc/.docx)转换/合并为Markdown文档。
 
 
 
