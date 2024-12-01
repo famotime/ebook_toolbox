@@ -29,7 +29,7 @@
 注意事项：
 - 监控模式下，粘贴不包含《》的内容可退出程序
 - 支持的书单文件格式：txt、md、html
-- 批量处理时出错会记录到_处理错误.txt
+- 批量处理时出错会记录到：处理错误.txt
 """
 
 from pathlib import Path
@@ -539,7 +539,13 @@ def process_book_list_directory(list_dir, search_dir):
 
     total_files = len(book_list_files)
     print(f"找到 {total_files} 个书单文件")
-    print(f"已处理 {len(processed_files)} 个文件")
+    print(f"历史已处理 {len(processed_files)} 个文件")
+
+    # 添加本次处理计数器
+    current_processed = 0
+
+    # 获取所有已存在的书单目录名
+    existing_dirs = {path.name.lower() for path in BOOKS_OUTPUT_DIR.iterdir() if path.is_dir()}
 
     try:
         # 处理每个书单文件
@@ -548,13 +554,52 @@ def process_book_list_directory(list_dir, search_dir):
                 print(f"\n[{i}/{total_files}] 跳过已处理的文件: {file_path.name}")
                 continue
 
+            # 检查是否已存在同名目录
+            elif file_path.stem.lower() in existing_dirs:
+                print(f"\n[{i}/{total_files}] 跳过已存在目录的文件: {file_path.name}")
+                # 记录为已处理
+                with progress_file.open('a', encoding='utf-8') as f:
+                    f.write(f"{file_path}\n")
+                continue
+
             try:
                 print(f"\n[{i}/{total_files}] 处理书单文件: {file_path.name}")
+
+                # 读取文件内容并提取书名
+                with file_path.open('r', encoding='utf-8') as f:
+                    content = f.read()
+                book_names = extract_book_names(content)
+
+                # 确定目标目录
+                if len(book_names) <= 1:
+                    target_dir = BOOKS_OUTPUT_DIR / "单本好书"
+                else:
+                    target_dir = BOOKS_OUTPUT_DIR / file_path.stem
+
+                # 处理书单
                 process_book_list(file_path, search_dir, from_clipboard=False)
+
+                # 移动书单文件到对应目录
+                target_dir.mkdir(exist_ok=True)
+                target_file = target_dir / file_path.name
+
+                # 如果目标文件已存在，添加时间戳
+                if target_file.exists():
+                    timestamp = time.strftime("_%Y%m%d_%H%M%S")
+                    target_file = target_dir / f"{file_path.stem}{timestamp}{file_path.suffix}"
+
+                try:
+                    shutil.move(str(file_path), str(target_file))
+                    print(f"已将书单文件移动到: {target_file}")
+                except Exception as e:
+                    print(f"移动书单文件失败: {e}")
 
                 # 记录处理成功的文件
                 with progress_file.open('a', encoding='utf-8') as f:
                     f.write(f"{file_path}\n")
+
+                # 增加本次处理计数
+                current_processed += 1
 
             except Exception as e:
                 print(f"处理失败: {e}")
@@ -570,19 +615,14 @@ def process_book_list_directory(list_dir, search_dir):
         print("\n用户中断处理")
 
     finally:
-        # 打印最终处理统计
-        with progress_file.open('r', encoding='utf-8') as f:
-            final_processed = len(set(line.strip() for line in f if line.strip()))
-        print(f"\n处理完成！总共处理了 {final_processed}/{total_files} 个文件")
+        # 打印最终处理统计，使用本次处理的计数
+        print(f"\n处理完成！本次处理了 {current_processed}/{total_files} 个文件")
 
 
 if __name__ == "__main__":
     search_dir = r"J:"    # 本地电子书库路径
-    list_dir = r"D:\Python_Work\Wiznotes_tools\wiznotes\兴趣爱好\读书观影\书单"    # 书单文件所在目录
+    list_dir = r"D:\Python_Work\Wiznotes_tools\wiznotes\兴趣爱好\读书观影\新书单"    # 书单文件所在目录
     BOOKS_OUTPUT_DIR = Path(r"J:\书单")  # 统一的书单输出目录
-
-    # 仅更新指定文件夹的文件索引（可选）
-    # folders_to_update = ["J:\书单", ]
 
     try:
         # 确保输出目录和单本好书目录都存在
@@ -591,19 +631,23 @@ if __name__ == "__main__":
 
         # 检查是否需要更新文件索引列表
         if check_file_list_update(search_dir):
-            generate_file_list(search_dir, folders_to_update)  # 传入folders_to_update参数
+            generate_file_list(search_dir)
+
+            # 仅更新指定文件夹的文件索引
+            # folders_to_update = ["J:\书单", ]
+            # generate_file_list(search_dir, folders_to_update)
 
         print("请选择运行模式：")
-        print("1. 剪贴板监控模式")
-        print("2. 批量处理书单文件")
+        print("1. 批量处理书单文件")
+        print("2. 剪贴板监控模式")
         mode = input("请输入模式编号(1/2): ").strip()
 
         if mode == "1":
-            # 启动剪贴板监控，使用统一的输出目录
-            monitor_clipboard(search_dir)
-        elif mode == "2":
             # 处理书单文件
             process_book_list_directory(list_dir, search_dir)
+        elif mode == "2":
+            # 启动剪贴板监控，使用统一的输出目录
+            monitor_clipboard(search_dir)
         else:
             print("无效的模式选择！")
 
