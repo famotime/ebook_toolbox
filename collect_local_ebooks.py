@@ -150,14 +150,15 @@ def search_file(filename, search_dir, folders_to_update=None):
 
     print(f"正在搜索：{filename}（清理后的搜索词：{name}）")
 
-    # 修改：仅在首次搜索时生成或更新文件列表
+    # 仅在首次搜索时生成或更新文件列表
     if not hasattr(search_file, '_file_cache'):
         # 如果文件列表不存在 或为空 或需要部分更新文件夹索引，则生成
         if not file_list_path.exists() or file_list_path.stat().st_size == 0 or folders_to_update:
-            print(f"正在生成文件索引列表，耗时较长，请等待：{file_list_path}")
+            print(f"正在生成文件索引列表：{file_list_path}，耗时较长，请等待……")
             file_list_path = generate_file_list(search_dir, folders_to_update)
 
         # 初始化文件缓存
+        print(f"正在读取文件索引列表：{file_list_path}，耗时较长，请等待……")
         search_file._file_cache = {'.epub': [], '.pdf': [], '.txt': []}
         with file_list_path.open('r', encoding='utf-8') as f:
             for line in f:
@@ -182,9 +183,11 @@ def search_file(filename, search_dir, folders_to_update=None):
         # 如果在当前优先级找到匹配，就不继续搜索次优先级的文件
         if matches:
             # 在相同后缀名下优先选择更大的文件，如果大小相同则选择更新的文件
-            return max(matches, key=lambda x: (x[2], x[3]))[0]
+            match = max(matches, key=lambda x: (x[2], x[3]))[0]
+            print(f"已找到：{match}\n")
+            return match
 
-    print(f"未找到：{filename}")
+    print(f"未找到：{filename}\n")
     return "未找到"
 
 def check_file_list_update(search_dir):
@@ -620,8 +623,8 @@ def process_book_list_directory(list_dir, search_dir):
 
 
 if __name__ == "__main__":
+    list_dir = r"D:\Python_Work\Wiznotes_tools\wiznotes\My Emails"    # 书单文件所在目录
     search_dir = r"J:"    # 本地电子书库路径
-    list_dir = r"D:\Python_Work\Wiznotes_tools\wiznotes\兴趣爱好\读书观影\新书单"    # 书单文件所在目录
     BOOKS_OUTPUT_DIR = Path(r"J:\书单")  # 统一的书单输出目录
 
     try:
