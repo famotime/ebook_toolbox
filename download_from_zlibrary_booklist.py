@@ -59,6 +59,7 @@ class BooklistDownloader:
         self.booklist_url = booklist_url
         self.save_dir = save_dir or Path("downloads")
         self.config = ZLibraryConfig.load_account_info()
+        self.downloaded_books = set()  # 初始化为空集合
 
         # 初始化API客户端
         if not self.config.remix_userid or not self.config.remix_userkey:
@@ -68,6 +69,15 @@ class BooklistDownloader:
             remix_userid=self.config.remix_userid,
             remix_userkey=self.config.remix_userkey
         )
+
+        # 获取并显示用户信息
+        user_profile = self.client.getProfile()["user"]
+        print("\n登录信息:")
+        print(f"用户名: {user_profile.get('name', 'N/A')}")
+        print(f"邮箱: {user_profile.get('email', 'N/A')}")
+        print(f"今日已下载: {user_profile.get('downloads_today', 0)} 本")
+        print(f"下载上限: {user_profile.get('downloads_limit', 10)} 本")
+        print(f"剩余下载配额: {self.client.getDownloadsLeft()} 本")
 
         # 创建下载目录
         self.save_dir.mkdir(parents=True, exist_ok=True)
@@ -79,8 +89,6 @@ class BooklistDownloader:
             'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
         }
 
-        self.downloaded_books = self._load_downloaded_books()
-
     def _load_downloaded_books(self) -> set:
         """通过扫描目标文件夹获取已下载书籍的清单"""
         downloaded_books = set()
@@ -90,7 +98,7 @@ class BooklistDownloader:
                 if file_path.is_file():
                     # 从文件名中提取书名（去掉作者和扩展名部分）
                     filename = file_path.stem
-                    book_title = filename.split(' - ')[0].strip()    # 假设文件名格式为 "书名 - 作者"
+                    book_title = filename.split('-')[0].strip()    # 假设文件名格式为 "书名-作者"
                     downloaded_books.add(book_title)
         return downloaded_books
 
@@ -112,20 +120,20 @@ class BooklistDownloader:
 
             try:
                 # 先登录
-                print("正在登录...")
-                driver.get("https://1lib.sk/")
+                # print("正在登录...")
+                # driver.get("https://1lib.sk/")
 
-                # 设置cookies来实现登录
-                cookies = {
-                    'remix_userid': self.config.remix_userid,
-                    'remix_userkey': self.config.remix_userkey
-                }
-                for name, value in cookies.items():
-                    driver.add_cookie({
-                        'name': name,
-                        'value': value,
-                        'domain': '1lib.sk'  # 确保域名正确
-                    })
+                # # 设置cookies来实现登录
+                # cookies = {
+                #     'remix_userid': self.config.remix_userid,
+                #     'remix_userkey': self.config.remix_userkey
+                # }
+                # for name, value in cookies.items():
+                #     driver.add_cookie({
+                #         'name': name,
+                #         'value': value,
+                #         'domain': '1lib.sk'  # 确保域名正确
+                #     })
 
                 # 加载书单页面
                 print("正在加载书单页面...")
@@ -175,6 +183,8 @@ class BooklistDownloader:
                     safe_title = self._safe_filename(booklist_title[0].strip())
                     self.save_dir = self.save_dir / safe_title
                     self.save_dir.mkdir(parents=True, exist_ok=True)
+                    # 在设置正确的save_dir后加载已下载书籍列表
+                    self.downloaded_books = self._load_downloaded_books()
 
                 # 获取所有书籍
                 books = []
@@ -239,7 +249,7 @@ class BooklistDownloader:
             print(f"正在搜索书籍信息: 《{book['title']}》(ID: {book['book_id']})")
 
             # 通过search API获取完整书籍信息
-            search_results = self.client.search(book['title'], extensions=[book['format'], 'epub'])
+            search_results = self.client.search(book['title'], extensions=[book['format']])
 
             # 检查search_results的结构
             if not search_results or 'books' not in search_results:
@@ -297,6 +307,13 @@ class BooklistDownloader:
 
     def run(self):
         """运行下载流程"""
+        # 检查下载配额
+        downloads_left = self.client.getDownloadsLeft()
+        print(f"\n当前剩余下载配额: {downloads_left}")
+        if downloads_left <= 0:
+            print("下载配额已用完，终止操作")
+            return
+
         # 解析书单
         print(f"正在解析书单: {self.booklist_url}")
         books = self.parse_booklist()
@@ -314,21 +331,21 @@ class BooklistDownloader:
         # 开始下载
         for i, book in enumerate(books, 1):
             print(f"\n[{i}/{total}] 正在处理: 《{book['title']}.{book['format']}》 by {book['author']}")
-            # print(f"作者: {book['author']}")
-            # print(f"语言: {book['language']}")
-            # print(f"年份: {book['year']}")
-            # print(f"格式: {book['format']}")
 
-            # 检查是否已下载
             if book['title'] in self.downloaded_books:
                 print(f"已下载: 《{book['title']}》，跳过")
-                # success += 1
                 continue
 
             if self.download_book(book):
                 success += 1
             else:
                 failed += 1
+
+            # 检查剩余配额
+            downloads_left = self.client.getDownloadsLeft()
+            if downloads_left <= 0:
+                print(f"\n下载配额已用完，停止后续下载")
+                break
 
             # 只有在实际进行下载时才添加延时
             time.sleep(2)
@@ -339,6 +356,7 @@ class BooklistDownloader:
         print(f"成功: {success} 本")
         print(f"失败: {failed} 本")
         print(f"下载目录: {self.save_dir}")
+        print(f"剩余下载配额: {self.client.getDownloadsLeft()}")
 
 def process_booklists_from_clipboard(save_dir: Path, base_url: str = "https://1lib.sk"):
     """从剪贴板获取书单链接并处理下载"""
@@ -356,6 +374,9 @@ def process_booklists_from_clipboard(save_dir: Path, base_url: str = "https://1l
         # 如果是相对路径（以/开头）
         elif raw_url.startswith('/'):
             urls.append(urljoin(base_url, raw_url))
+        # 如果不包含/，则跳过
+        elif '/' not in raw_url:
+            continue
         # 如果是纯路径（不以/开头）
         else:
             urls.append(urljoin(base_url, '/' + raw_url))
@@ -379,6 +400,11 @@ def process_booklists_from_clipboard(save_dir: Path, base_url: str = "https://1l
         print(f"URL: {booklist_url}")
         try:
             downloader = BooklistDownloader(booklist_url, save_dir)
+            # 检查下载配额
+            downloads_left = downloader.client.getDownloadsLeft()
+            if downloads_left <= 0:
+                print("下载配额已用完，终止操作")
+                break
             downloader.run()
         except KeyboardInterrupt:
             print("\n用户中断下载")
