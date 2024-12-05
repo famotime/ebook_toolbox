@@ -6,7 +6,7 @@
 
 1. `collect_local_ebooks.py`: 本地电子书搜索与整理工具
 2. `download_ebooks_from_zlibrary.py`: Z-Library电子书下载工具
-3. `download_from_zlibrary_booklist.py`: 根据Z-Library书单下载电子书工具
+3. `download_from_zlibrary_booklist.py`: 从Z-Library书单下载电子书工具
 
 辅助工具：
 
@@ -41,7 +41,7 @@
 
 ### Z-Library电子书下载 (download_ebooks_from_zlibrary.py)
 
-从Z-Library自动批量下载电子书。
+自动读取书单目录中的缺失的电子书，从Z-Library自动搜索并批量下载。
 
 - 自动处理登录和搜索过程
 - 自动读取书单目录中的缺失文件，批量下载电子书
@@ -62,7 +62,7 @@ Z-Library的普通账号每天下载配额是10本书，如果不够用，可以
 
 ### 根据Z-Library书单下载电子书 (download_from_zlibrary_booklist.py)
 
-根据Z-Library书单下载电子书。
+根据 Z-Library Booklists 中相关书单网址，自动解析书单页面包含的电子书并批量下载。
 
 - 从配置文件读取帐号信息，并登录Zlibrary
 - 通过URL访问书单Web页面，解析其中的电子书信息，并逐个下载电子书
