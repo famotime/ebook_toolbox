@@ -1,7 +1,7 @@
 """
-从zlibrary书单下载电子书
+根据 zlibrary Booklist 批量下载电子书
 1. 从配置文件读取帐号信息，并登录Zlibrary；
-2. 通过url访问书单Web页面，解析其中的电子书信息，并逐个下载电子书；
+2. 读取剪贴板中的 Zlibrary Booklist 网址，访问对应的书单页面，解析并逐个下载电子书；
 3. 将下载的电子书保存到以书单命名的文件夹中；
 """
 
@@ -79,8 +79,6 @@ class BooklistDownloader:
             'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
         }
 
-        # 下载清单文件路径
-        self.downloaded_list_path = self.save_dir / "downloaded_books.txt"
         self.downloaded_books = self._load_downloaded_books()
 
     def _load_downloaded_books(self) -> set:
@@ -91,16 +89,10 @@ class BooklistDownloader:
             for file_path in self.save_dir.glob('*.*'):
                 if file_path.is_file():
                     # 从文件名中提取书名（去掉作者和扩展名部分）
-                    filename = file_path.stem  # 获取不含扩展名的文件名
-                    # 假设文件名格式为 "书名 - 作者"
-                    book_title = filename.split(' - ')[0].strip()
+                    filename = file_path.stem
+                    book_title = filename.split(' - ')[0].strip()    # 假设文件名格式为 "书名 - 作者"
                     downloaded_books.add(book_title)
         return downloaded_books
-
-    def _save_downloaded_book(self, book_title: str):
-        """保存已下载书籍到清单"""
-        with self.downloaded_list_path.open('a', encoding='utf-8') as f:
-            f.write(f"{book_title}\n")
 
     def parse_booklist(self) -> List[Dict[str, str]]:
         """解析书单页面，获取书籍信息列表"""
@@ -146,7 +138,7 @@ class BooklistDownloader:
 
                 # 循环点击"Show more"按钮
                 retry_count = 0
-                max_retries = 10
+                max_retries = 20
                 while retry_count < max_retries:
                     try:
                         # 等待"Show more"按钮出现
@@ -236,19 +228,18 @@ class BooklistDownloader:
                 return False
 
             # 构造文件名
-            safe_filename = self._safe_filename(f"{book['title']} - {book['author']}.{book['format'].lower()}")
+            safe_filename = self._safe_filename(f"{book['title']}.{book['format'].lower()}")
             file_path = self.save_dir / safe_filename
 
             # 检查文件是否已存在
             if file_path.exists():
                 print(f"文件已存在: {file_path}，跳过")
-                self._save_downloaded_book(book['title'])
                 return True
 
             print(f"正在搜索书籍信息: 《{book['title']}》(ID: {book['book_id']})")
 
             # 通过search API获取完整书籍信息
-            search_results = self.client.search(book['title'])
+            search_results = self.client.search(book['title'], extensions=[book['format'], 'epub'])
 
             # 检查search_results的结构
             if not search_results or 'books' not in search_results:
@@ -258,7 +249,7 @@ class BooklistDownloader:
             # 在搜索结果中查找匹配的book_id
             book_detail = None
             for result in search_results['books']:
-                if str(result.get('id')) == str(book['book_id']):
+                if str(result.get('id')) == str(book['book_id']) or str(result.get('title')) == str(book['title']):
                     book_detail = result
                     break
 
@@ -279,9 +270,6 @@ class BooklistDownloader:
                 f.write(content)
 
             print(f"下载成功: {file_path}")
-
-            # 保存到已下载清单
-            self._save_downloaded_book(book['title'])
 
             return True
 
@@ -325,16 +313,16 @@ class BooklistDownloader:
 
         # 开始下载
         for i, book in enumerate(books, 1):
-            print(f"\n[{i}/{total}] 处理: 《{book['title']}》")
-            print(f"作者: {book['author']}")
-            print(f"语言: {book['language']}")
-            print(f"年份: {book['year']}")
-            print(f"格式: {book['format']}")
+            print(f"\n[{i}/{total}] 正在处理: 《{book['title']}.{book['format']}》 by {book['author']}")
+            # print(f"作者: {book['author']}")
+            # print(f"语言: {book['language']}")
+            # print(f"年份: {book['year']}")
+            # print(f"格式: {book['format']}")
 
             # 检查是否已下载
             if book['title'] in self.downloaded_books:
-                print(f"已下���: 《{book['title']}》，跳过")
-                success += 1
+                print(f"已下载: 《{book['title']}》，跳过")
+                # success += 1
                 continue
 
             if self.download_book(book):
@@ -352,15 +340,8 @@ class BooklistDownloader:
         print(f"失败: {failed} 本")
         print(f"下载目录: {self.save_dir}")
 
-
-if __name__ == "__main__":
-    import pyperclip
-    from urllib.parse import urlparse, urljoin
-
-    save_dir = Path(r"J:\zlibrary_booklists")
-    BASE_URL = "https://1lib.sk"  # Z-Library的基础URL
-
-    # 从剪贴板获取内容
+def process_booklists_from_clipboard(save_dir: Path, base_url: str = "https://1lib.sk"):
+    """从剪贴板获取书单链接并处理下载"""
     clipboard_content = pyperclip.paste()
 
     # 处理每一行内容
@@ -374,10 +355,10 @@ if __name__ == "__main__":
                 urls.append(raw_url)
         # 如果是相对路径（以/开头）
         elif raw_url.startswith('/'):
-            urls.append(urljoin(BASE_URL, raw_url))
-        # 如果是纯路径（不��/开头）
+            urls.append(urljoin(base_url, raw_url))
+        # 如果是纯路径（不以/开头）
         else:
-            urls.append(urljoin(BASE_URL, '/' + raw_url))
+            urls.append(urljoin(base_url, '/' + raw_url))
 
     if not urls:
         print("剪贴板中未找到有效的zlibrary书单链接")
@@ -412,3 +393,13 @@ if __name__ == "__main__":
             time.sleep(10)
 
     print("\n所有书单处理完成!")
+
+if __name__ == "__main__":
+    import pyperclip
+    from urllib.parse import urlparse, urljoin
+
+    save_dir = Path(r"J:\zlibrary_booklists")
+    BASE_URL = "https://1lib.sk"  # Z-Library的基础URL
+
+    # 从剪贴板读取书单链接
+    process_booklists_from_clipboard(save_dir, BASE_URL)
