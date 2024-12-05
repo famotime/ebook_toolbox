@@ -156,6 +156,7 @@ class ZLibraryDownloader:
                 return None
 
             print(f"找到: 《{found_book['title']}》 by {found_book.get('author', '未知作者')}")
+            # print(found_book)
 
             # 检查剩余下载次数
             downloads_left = self.client.getDownloadsLeft()
@@ -273,7 +274,7 @@ def main(root_dir: Path | str, progress_file: Path = None):
     result_files = find_result_files(root_dir)
     result_files = [f for f in result_files if str(f) not in stats.processed_file_list]
     stats.total_files = len(result_files)
-    print(f"找到 {stats.total_files} 个待处理文件")
+    print(f"找到 {stats.total_files} 个待处理书单文件")
 
     if result_files:
         for result_file in result_files:

@@ -6,6 +6,7 @@
 
 1. `collect_local_ebooks.py`: 本地电子书搜索与整理工具
 2. `download_ebooks_from_zlibrary.py`: Z-Library电子书下载工具
+3. `download_from_zlibrary_booklist.py`: 根据Z-Library书单下载电子书工具
 
 辅助工具：
 
@@ -38,7 +39,6 @@
 - 文件名匹配规则：必须以搜索词开头
 - 同一本书存在多个版本时，优先选择更大的文件
 
-
 ### Z-Library电子书下载 (download_ebooks_from_zlibrary.py)
 
 从Z-Library自动批量下载电子书。
@@ -59,6 +59,15 @@
 代码库中附带了一个示例目录和文件，你需要把它拷贝到父目录，并在web_account.json中修改你的账号信息。当然，你也可以不用这么麻烦，直接把账号密码信息写在源代码里。
 
 Z-Library的普通账号每天下载配额是10本书，如果不够用，可以考虑购买VIP账号。
+
+### 根据Z-Library书单下载电子书 (download_from_zlibrary_booklist.py)
+
+根据Z-Library书单下载电子书。
+
+- 从配置文件读取帐号信息，并登录Zlibrary
+- 通过URL访问书单Web页面，解析其中的电子书信息，并逐个下载电子书
+- 自动处理登录和书单解析
+- 支持断点续传，避免重复下载
 
 ## 辅助工具说明
 
@@ -93,8 +102,6 @@ Z-Library的普通账号每天下载配额是10本书，如果不够用，可以
 
 用于将Word文档(.doc/.docx)转换/合并为Markdown文档。
 
-
-
 ## 依赖库
 
 - pyperclip：用于剪贴板操作
@@ -102,4 +109,6 @@ Z-Library的普通账号每天下载配额是10本书，如果不够用，可以
 - ebooklib：用于读取EPUB电子书
 - Zlibrary.py：Z-Library API封装库
 - docx2txt：用于提取Word文档内容
+- selenium：用于自动化浏览器操作
+- lxml：用于解析HTML文档
 
