@@ -18,6 +18,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import threading
 import pyperclip
 from urllib.parse import urlparse, urljoin
+import logging
+from datetime import datetime
 
 @dataclass
 class ZLibraryConfig:
@@ -57,14 +59,50 @@ class ZLibraryConfig:
             print(f"读取账号配置文件失败: {e}")
             return cls()
 
+def setup_logging(save_dir: Path) -> logging.Logger:
+    """配置日志记录器"""
+    # 获取logger
+    logger = logging.getLogger('zlibrary_downloader')
+
+    # 如果logger已经有处理器，说明已经配置过，���接返回
+    if logger.handlers:
+        return logger
+
+    # 创建logs目录
+    log_dir = save_dir / 'logs'
+    log_dir.mkdir(parents=True, exist_ok=True)
+
+    # 生成日志文件名
+    log_file = log_dir / f'zlibrary_download_{datetime.now().strftime("%Y%m%d_%H%M%S")}.log'
+
+    # 配置日志格式
+    formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+
+    # 文件处理器
+    file_handler = logging.FileHandler(log_file, encoding='utf-8')
+    file_handler.setFormatter(formatter)
+
+    # 控制台处理器
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(formatter)
+
+    # 配置logger
+    logger.setLevel(logging.INFO)
+    logger.addHandler(file_handler)
+    logger.addHandler(console_handler)
+
+    return logger
+
 class BooklistDownloader:
     """Z-Library书单下载器"""
 
-    def __init__(self, booklist_url: str, save_dir: Path = None, local_library_path: Path = None, local_files_index: Dict = None):
+    def __init__(self, booklist_url: str, save_dir: Path = None, local_library_path: Path = None,
+                 local_files_index: Dict = None, use_local_index: bool = True):
         self.booklist_url = booklist_url
         self.save_dir = save_dir or Path("downloads")
         self.local_library_path = local_library_path
-        self.local_files_index = local_files_index or {}
+        self.use_local_index = use_local_index
+        self.local_files_index = local_files_index if use_local_index else {}
         self.config = ZLibraryConfig.load_account_info()
         self.downloaded_books = set()
         self.max_workers = 10  # 设置最大并行数
@@ -81,12 +119,13 @@ class BooklistDownloader:
 
         # 获取并显示用户信息
         user_profile = self.client.getProfile()["user"]
-        print("\n登录信息:")
-        print(f"用户名: {user_profile.get('name', 'N/A')}")
-        print(f"邮箱: {user_profile.get('email', 'N/A')}")
-        print(f"今日已下载: {user_profile.get('downloads_today', 0)} 本")
-        print(f"下载上限: {user_profile.get('downloads_limit', 10)} 本")
-        print(f"剩余下载配额: {self.client.getDownloadsLeft()} 本\n")
+        self.logger = setup_logging(self.save_dir)
+        self.logger.info("\n登录信息:")
+        self.logger.info(f"用户名: {user_profile.get('name', 'N/A')}")
+        self.logger.info(f"邮箱: {user_profile.get('email', 'N/A')}")
+        self.logger.info(f"今日已下载: {user_profile.get('downloads_today', 0)} 本")
+        self.logger.info(f"下载上限: {user_profile.get('downloads_limit', 10)} 本")
+        self.logger.info(f"剩余下载配额: {self.client.getDownloadsLeft()} 本\n")
 
         # 创建下载目录
         self.save_dir.mkdir(parents=True, exist_ok=True)
@@ -127,7 +166,7 @@ class BooklistDownloader:
 
             try:
                 # 加载书单页面
-                print("正在加载书单页面...")
+                self.logger.info("正在加载书单页面...")
                 driver.get(self.booklist_url)
 
                 # 等待页面加载完成
@@ -146,23 +185,23 @@ class BooklistDownloader:
                         )
 
                         if not show_more.is_displayed():
-                            print("已加载所有内容")
+                            self.logger.info("已加载所有内容")
                             break
 
                         driver.execute_script("arguments[0].click();", show_more)  # 使用JavaScript点击
                         retry_count += 1  # 增加计数器
-                        print(f"{retry_count}/{max_retries}  加载更多书籍...")
+                        self.logger.info(f"{retry_count}/{max_retries}  加载更多书籍...")
                         time.sleep(3)  # 等待加载
 
                     except TimeoutException:
-                        print("没有更多内容需要加载")
+                        self.logger.info("没有更多内容需要加载")
                         break
                     except Exception as e:
-                        print(f"点击'Show more'按钮时出错: {e}")
+                        self.logger.error(f"点击'Show more'按钮时出错: {e}")
                         retry_count += 1
                         time.sleep(2)
                     if retry_count >= max_retries:
-                        print(f"达到最大点击次数限制({max_retries}次),继续处理已加载的内容……")
+                        self.logger.info(f"达到最大点击次数限制({max_retries}次),继续处理已加载的内容……")
 
                 # 获取完整的页面内容
                 page_content = driver.page_source
@@ -177,27 +216,57 @@ class BooklistDownloader:
                     self.save_dir.mkdir(parents=True, exist_ok=True)
                     # 在设置正确的save_dir后加载已下载书籍列表
                     self.downloaded_books = self._load_downloaded_books()
+                else:
+                    self.logger.warning("未能获取到书单标题，使用默认目录名")
+                    safe_title = "未命名书单"
+                    self.save_dir = self.save_dir / safe_title
+                    self.save_dir.mkdir(parents=True, exist_ok=True)
+                    self.downloaded_books = self._load_downloaded_books()
 
                 # 获取所有书籍
                 books = []
                 book_elements = tree.xpath('//z-bookcard')
 
+                if not book_elements:
+                    self.logger.warning("未找到任何书籍元素，可能是页面结构发生变化")
+                    return []
+
                 for element in book_elements:
-                    # 提取书籍信息
-                    download_path = element.get('download', '')
-                    download_url = f"https://1lib.sk{download_path}" if download_path else ""
+                    try:
+                        # 提取书籍信息，添加错误处理
+                        title = element.xpath('.//div[@slot="title"]/text()')
+                        author = element.xpath('.//div[@slot="author"]/text()')
 
-                    book = {
-                        'title': element.xpath('.//div[@slot="title"]/text()')[0].strip(),
-                        'author': element.xpath('.//div[@slot="author"]/text()')[0].strip(),
-                        'book_id': element.get('id'),
-                        'language': element.get('language'),
-                        'year': element.get('year'),
-                        'format': element.get('extension'),
-                        'download_url': download_url
-                    }
+                        if not title or not author:
+                            self.logger.warning(f"跳过一本书籍：标题或作者信息不完整")
+                            continue
 
-                    books.append(book)
+                        download_path = element.get('download', '')
+                        download_url = f"https://1lib.sk{download_path}" if download_path else ""
+
+                        book = {
+                            'title': title[0].strip(),
+                            'author': author[0].strip(),
+                            'book_id': element.get('id', ''),
+                            'language': element.get('language', ''),
+                            'year': element.get('year', ''),
+                            'format': element.get('extension', ''),
+                            'download_url': download_url
+                        }
+
+                        if book['title'] and book['book_id']:  # 确保至少有标题和ID
+                            books.append(book)
+                        else:
+                            self.logger.warning(f"跳过一本书籍：缺少必要信息")
+
+                    except Exception as e:
+                        self.logger.warning(f"解析单本书籍信息时出错: {e}")
+                        continue
+
+                if not books:
+                    self.logger.warning("未能成功解析任何书籍信息")
+                else:
+                    self.logger.info(f"成功解析 {len(books)} 本书籍信息")
 
                 return books
 
@@ -205,7 +274,8 @@ class BooklistDownloader:
                 driver.quit()
 
         except Exception as e:
-            print(f"解析书单页面失败: {e}")
+            self.logger.error(f"解析书单页面失���: {str(e)}")
+            self.logger.debug("错误详情:", exc_info=True)  # 添加详细的错误信息
             return []
 
     def _get_text(self, element, xpath: str) -> str:
@@ -221,36 +291,39 @@ class BooklistDownloader:
         try:
             # 检查是否已下载
             if book['title'] in self.downloaded_books:
-                print(f"[{len(self.downloaded_books)}/{self.total_books}] 已下载: 《{book['title']}》，跳过")
+                self.logger.info(f"[{len(self.downloaded_books)}/{self.total_books}] 已下载: 《{book['title']}》，跳过")
                 return True
 
             # 构造文件名
             safe_filename = self._safe_filename(f"{book['title']}")
             file_extension = book['format'].lower()
 
-            # 检查本地文件库
-            print(f"正在从本地文件库搜索匹配文件《{safe_filename}》……")
-            local_key = (safe_filename, f".{file_extension}")
-            if local_key in self.local_files_index:
-                source_path = self.local_files_index[local_key]
-                target_path = self.save_dir / f"{safe_filename}.{file_extension}"
+            # 仅在启用本地索引时进行本地文件搜索
+            if self.use_local_index and self.local_files_index:
+                self.logger.info(f"正在从本地文件库搜索匹配文件《{safe_filename}》……")
+                local_key = (safe_filename, f".{file_extension}")
+                if local_key in self.local_files_index:
+                    source_path = self.local_files_index[local_key]
+                    target_path = self.save_dir / f"{safe_filename}.{file_extension}"
 
-                if not target_path.exists():
-                    target_path.parent.mkdir(parents=True, exist_ok=True)
-                    copy2(source_path, target_path)
-                    self.downloaded_books.add(book['title'])
-                    print(f"\n[{len(self.downloaded_books)}/{self.total_books}] 在本地文件库中找到匹配文件，成功复制: {target_path}\n")
-                    return True
-                else:
-                    print(f"目标位置已存在文件: {target_path}")
-                    return True
+                    if not target_path.exists():
+                        target_path.parent.mkdir(parents=True, exist_ok=True)
+                        copy2(source_path, target_path)
+                        self.downloaded_books.add(book['title'])
+                        self.logger.info(f"\n[{len(self.downloaded_books)}/{self.total_books}] 在本地文件库中找到匹配文件，成功复制: {target_path}\n")
+                        return True
+                    else:
+                        self.logger.info(f"目标位置已存在文件: {target_path}")
+                        return True
+            elif not self.use_local_index:
+                self.logger.info("已禁用本地文件库搜索，直接进行网络下载...")
 
             # 如果本地没有找到，继续原有的下载逻辑
-            print(f"本地文件库中未找到匹配文件《{safe_filename}》，继续从网络下载……")
+            self.logger.info(f"本地文件库中未找到匹配文件《{safe_filename}》，继续从网络下载……")
 
             # 检查必要的字段
             if not book.get('book_id') or not book.get('title'):
-                print(f"错误：缺少必要的书籍信息")
+                self.logger.error(f"错误：缺少必要的书籍信息")
                 return False
 
             # 构造文件名
@@ -259,17 +332,17 @@ class BooklistDownloader:
 
             # 检查文件是否已存在
             if file_path.exists():
-                print(f"文件已存在: {file_path}，跳过")
+                self.logger.info(f"文件已存在: {file_path}，跳过")
                 return True
 
-            print(f"正在搜索书籍信息: 《{book['title']}》(ID: {book['book_id']})")
+            self.logger.info(f"正在搜索书籍信息: 《{book['title']}》(ID: {book['book_id']})")
 
             # 通过search API获取完整书籍信息
             search_results = self.client.search(book['title'], extensions=[book['format']])
 
             # 检查search_results的结构
             if not search_results or 'books' not in search_results:
-                print(f"搜索失败：未找到相关书籍")
+                self.logger.error(f"搜索失败：未找到相关书籍")
                 return False
 
             # 在搜索结果中查找匹配的book_id
@@ -280,15 +353,15 @@ class BooklistDownloader:
                     break
 
             if not book_detail:
-                print(f"未找到匹配的书籍信息")
+                self.logger.error(f"未找到匹配的书籍信息")
                 return False
 
-            print(f"正在下载: 《{book_detail['title']}》 ({book_detail['extension']})")
+            self.logger.info(f"正在下载: 《{book_detail['title']}》 ({book_detail['extension']})")
 
             # 使用API下载图书
             filename, content = self.client.downloadBook(book_detail)
             if not content:
-                print(f"下载失败: 《{book_detail['title']}》")
+                self.logger.error(f"下载失败: 《{book_detail['title']}》")
                 return False
 
             # 保存文件
@@ -296,19 +369,19 @@ class BooklistDownloader:
                 f.write(content)
 
             self.downloaded_books.add(book['title'])
-            print(f"\n[{len(self.downloaded_books)}/{self.total_books}] 下载成功: {file_path}\n")
+            self.logger.info(f"\n[{len(self.downloaded_books)}/{self.total_books}] 下载成功: {file_path}\n")
 
             return True
 
         except requests.exceptions.RequestException as e:
-            print(f"网络请求错误: {str(e)}")
+            self.logger.error(f"网络请求错误: {str(e)}")
             return False
         except KeyboardInterrupt:
-            print("\n用户中断下载")
+            self.logger.info("\n用户中断下载")
             raise
         except Exception as e:
-            print(f"下载图书时出错: {str(e)}")
-            print(f"错误类型: {type(e).__name__}")
+            self.logger.error(f"下载图书时出错: {str(e)}")
+            self.logger.error(f"错误类型: {type(e).__name__}")
             return False
 
     def _safe_filename(self, filename: str) -> str:
@@ -326,20 +399,20 @@ class BooklistDownloader:
         """运行下载流程"""
         # 检查下载配额
         downloads_left = self.client.getDownloadsLeft()
-        print(f"\n当前剩余下载配额: {downloads_left}")
+        self.logger.info(f"\n当前剩余下载配额: {downloads_left}")
         if downloads_left <= 0:
-            print("下载配额已用完，终止操作\n")
+            self.logger.info("下载配额已用完，终止操作\n")
             return
 
         # 解析书单
-        print(f"正在解析书单: {self.booklist_url}")
+        self.logger.info(f"正在解析书单: {self.booklist_url}")
         books = self.parse_booklist()
         if not books:
-            print("未找到任何图书信息\n")
-            return
+            self.logger.info("未找到任何图书信息\n")
+            return False
 
         self.total_books = len(books)
-        print(f"找到 {self.total_books} 本图书")
+        self.logger.info(f"找到 {self.total_books} 本图书")
 
         # 使用线程池进行并行下载
         with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
@@ -356,23 +429,27 @@ class BooklistDownloader:
                 try:
                     future.result()
                 except Exception as e:
-                    print(f"下载《{book['title']}》时发生错误: {e}")
+                    self.logger.error(f"下载《{book['title']}》时发生错误: {e}")
 
                 # 检查剩余配额
                 downloads_left = self.client.getDownloadsLeft()
                 if downloads_left <= 0:
-                    print(f"\n下载配额已用完，停止后续下载\n")
+                    self.logger.info(f"\n下载配额已用完，停止后续下载\n")
                     break
 
-        print("\n下载完成!")
-        print(f"总计: {self.total_books} 本")
-        print(f"成功: {len(self.downloaded_books)} 本")
-        print(f"失败: {self.total_books - len(self.downloaded_books)} 本")
-        print(f"下载目录: {self.save_dir}")
-        print(f"剩余下载配额: {self.client.getDownloadsLeft()}\n")
+        self.logger.info("\n下载完成!")
+        self.logger.info(f"总计: {self.total_books} 本")
+        self.logger.info(f"成功: {len(self.downloaded_books)} 本")
+        self.logger.info(f"失败: {self.total_books - len(self.downloaded_books)} 本")
+        self.logger.info(f"下载目录: {self.save_dir}")
+        self.logger.info(f"剩余下载配额: {self.client.getDownloadsLeft()}\n")
 
-def process_booklists_from_clipboard(save_dir: Path, base_url: str = "https://1lib.sk", local_library_path: Path = None):
+def process_booklists_from_clipboard(save_dir: Path, base_url: str = "https://1lib.sk",
+                                   local_library_path: Path = None, use_local_index: bool = True):
     """从剪贴板获取书单链接并处理下载"""
+    # 添加logger初始化
+    logger = setup_logging(save_dir)
+
     clipboard_content = pyperclip.paste()
 
     # 处理每一行内容
@@ -395,65 +472,69 @@ def process_booklists_from_clipboard(save_dir: Path, base_url: str = "https://1l
             urls.append(urljoin(base_url, '/' + raw_url))
 
     if not urls:
-        print("剪贴板中未找到有效的zlibrary书单链接")
-        print("请复制书单链接到剪贴板后重试")
-        print("支持的格式：")
-        print("1. 完整URL：https://1lib.sk/booklist/...")
-        print("2. 相对路径：/booklist/...")
-        print("3. 纯路径：booklist/...")
+        logger.error("剪贴板中未找到有效���zlibrary书单链接")
+        logger.info("请复制书单链接到剪贴板后重试")
+        logger.info("支持的格式：")
+        logger.info("1. 完整URL：https://1lib.sk/booklist/...")
+        logger.info("2. 相对路径：/booklist/...")
+        logger.info("3. 纯路径：booklist/...")
         exit(1)
 
-    print(f"找到 {len(urls)} 个书单链接:")
+    logger.info(f"找到 {len(urls)} 个书单链接:")
     for i, url in enumerate(urls, 1):
-        print(f"{i}. {url}")
-    print()
+        logger.info(f"{i}. {url}")
+    logger.info("")
 
-    # 先读取本地文件索引
+    # 仅在启用本地索引时构建索引
     local_files_index = {}
-    if local_library_path and local_library_path.exists():
+    if use_local_index and local_library_path and local_library_path.exists():
         local_files_index = build_local_files_index(local_library_path)
+    elif not use_local_index:
+        logger.info("已禁用本地文件库索引功能")
 
     # 逐个处理书单
     for i, booklist_url in enumerate(urls, 1):
-        print(f"\n处理第 {i}/{len(urls)} 个书单:")
-        print(f"URL: {booklist_url}")
+        logger.info("-" * 50)
+        logger.info(f"处理第 {i}/{len(urls)} 个书单:")
+        logger.info(f"URL: {booklist_url}")
         try:
             # 创建下载器时传入已建立的索引
             downloader = BooklistDownloader(
                 booklist_url,
                 save_dir,
                 local_library_path,
-                local_files_index=local_files_index  # 传入已建立的索引
+                local_files_index=local_files_index,
+                use_local_index=use_local_index
             )
             # 检查下载配额
             downloads_left = downloader.client.getDownloadsLeft()
             if downloads_left <= 0:
-                print("下载配额已用完，终止操作")
+                logger.info("下载配额已用完，终止操作")
                 break
             downloader.run()
         except KeyboardInterrupt:
-            print("\n用户中断下载")
+            logger.info("\n用户中断下载")
             break
         except Exception as e:
-            print(f"处理书单时出错: {e}")
+            logger.error(f"处理书单时出错: {e}")
             continue
 
         # 书单间添加延时
         if i < len(urls):
-            print("\n等待5秒后处理下一个书单...")
+            logger.info("\n等待5秒后处理下一个书单...")
             time.sleep(5)
 
-    print("\n所有书单处理完成!")
+    logger.info("\n所有书单处理完成!")
 
-# 将索引建立逻辑移到独立函数
 def build_local_files_index(local_library_path: Path) -> Dict:
     """建立本地文件索引"""
+    logger = logging.getLogger('zlibrary_downloader')
     local_files_index = {}
     file_list_path = local_library_path / '_file_list.txt'
 
     # 如果索引文件存在且不为空，直接读取
     if file_list_path.exists() and file_list_path.stat().st_size > 0:
-        print(f"正在从索引文件读取本地文件库: {file_list_path}，请耐心等待……")
+        logger.info(f"正在从索引文件读取本地文件库: {file_list_path}，请耐心等待……")
         with file_list_path.open('r', encoding='utf-8') as f:
             for line in f:
                 try:
@@ -464,35 +545,43 @@ def build_local_files_index(local_library_path: Path) -> Dict:
                     local_files_index[key] = path
                 except:
                     continue
-        print(f"已读取本地文件索引，共计 {len(local_files_index)} 个电子书文件")
+        logger.info(f"已读取本地文件索引，共计 {len(local_files_index)} 个电子书文件")
         return local_files_index
 
     # 如果索引文件不存在或为空，则重新生成
-    print(f"正在索引本地文件库: {local_library_path}，请耐心等待……")
+    logger.info(f"正在索引本地文件库: {local_library_path}，请耐心等待……")
     files = []
+    # 需要排除的系统文件夹
+    exclude_dirs = {'$RECYCLE.BIN', 'System Volume Information', 'Recovery'}
     for ext in ['.epub', '.pdf', '.txt', '.mobi', '.azw3']:  # 支持的文件类型
         try:
             for p in local_library_path.rglob(f'*{ext}'):
                 try:
+                    # 检查路径中是否包含需要排除的系统文件夹
+                    if any(x in p.parts for x in exclude_dirs):
+                        continue
                     if p.is_file():
                         stat = p.stat()
+                        # 跳过小于10KB的文件
+                        if stat.st_size < 10 * 1024:  # 10KB = 10 * 1024 bytes
+                            continue
                         files.append(f"{p}|{stat.st_size}|{stat.st_mtime}")
                         key = (p.stem, p.suffix.lower())
                         local_files_index[key] = p
                 except (PermissionError, OSError):
                     continue
         except Exception as e:
-            print(f"搜索{ext}文件时出错: {e}")
+            logger.error(f"搜索{ext}文件时出错: {e}")
             continue
 
     # 保存索引文件
     try:
         with file_list_path.open('w', encoding='utf-8') as f:
             f.write('\n'.join(files))
-        print("完成本地文件索引，共计找到", len(files), "个电子书文件")
-        print(f"索引文件已保存到: {file_list_path}")
+        logger.info("完成本地文件索引，共计找到", len(files), "个电子书文件")
+        logger.info(f"索引文件已保存到: {file_list_path}")
     except Exception as e:
-        print(f"保存索引文件失败: {e}")
+        logger.error(f"保存索引文件失败: {e}")
 
     return local_files_index
 
@@ -500,6 +589,12 @@ if __name__ == "__main__":
     save_dir = Path(r"J:\zlibrary_booklists")
     local_library_path = Path(r"J:")  # 设置本地文件库路径
     BASE_URL = "https://1lib.sk"
+    USE_LOCAL_INDEX = True  # 控制是否使用本地索引
 
     # 从剪贴板读取书单链接
-    process_booklists_from_clipboard(save_dir, BASE_URL, local_library_path)
+    process_booklists_from_clipboard(
+        save_dir,
+        BASE_URL,
+        local_library_path,
+        use_local_index=USE_LOCAL_INDEX
+    )
