@@ -14,6 +14,8 @@ from dataclasses import dataclass
 from Zlibrary import Zlibrary
 from typing import List, Dict, Optional
 from shutil import copy2
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import threading
 
 @dataclass
 class ZLibraryConfig:
@@ -63,6 +65,8 @@ class BooklistDownloader:
         self.local_files_index = {}  # 本地文件索引
         self.config = ZLibraryConfig.load_account_info()
         self.downloaded_books = set()
+        self.lock = threading.Lock()  # 添加线程锁
+        self.max_workers = 5  # 设置最大并行数
 
         # 初始化API客户端
         if not self.config.remix_userid or not self.config.remix_userkey:
@@ -102,7 +106,7 @@ class BooklistDownloader:
 
         # 如果索引文件存在且不为空，直接读取
         if file_list_path.exists() and file_list_path.stat().st_size > 0:
-            print(f"正在从索引文件读取本地文件库: {file_list_path}")
+            print(f"正在从索引文件读取本地文件库: {file_list_path}，请耐心等待……")
             with file_list_path.open('r', encoding='utf-8') as f:
                 for line in f:
                     try:
@@ -113,11 +117,11 @@ class BooklistDownloader:
                             self.local_files_index[key] = path
                     except:
                         continue
-            print(f"本地文件索引完成，共找到 {len(self.local_files_index)} 个文件")
+            print(f"已读取本地文件索引，共计 {len(self.local_files_index)} 个电子书文件")
             return
 
         # 如果索引文件不存在或为空，则重新生成
-        print(f"正在索引本地文件库: {self.local_library_path}")
+        print(f"正在索引本地文件库: {self.local_library_path}，请耐心等待……")
         files = []
         for ext in ['.epub', '.pdf', '.txt', '.mobi', '.azw3']:  # 支持的文件类型
             try:
@@ -138,6 +142,7 @@ class BooklistDownloader:
         try:
             with file_list_path.open('w', encoding='utf-8') as f:
                 f.write('\n'.join(files))
+            print("完成本地文件索引，共计找到", len(files), "个电子书文件")
             print(f"索引文件已保存到: {file_list_path}")
         except Exception as e:
             print(f"保存索引文件失败: {e}")
@@ -293,16 +298,16 @@ class BooklistDownloader:
             file_extension = book['format'].lower()
 
             # 检查本地文件库
+            print(f"正在从本地文件库搜索匹配文件《{safe_filename}》……")
             local_key = (safe_filename, f".{file_extension}")
             if local_key in self.local_files_index:
                 source_path = self.local_files_index[local_key]
                 target_path = self.save_dir / f"{safe_filename}.{file_extension}"
 
                 if not target_path.exists():
-                    print(f"在本地文件库中找到匹配文件，正在复制: {source_path.name}")
                     target_path.parent.mkdir(parents=True, exist_ok=True)
                     copy2(source_path, target_path)
-                    print(f"本地文件复制成功: {target_path}")
+                    print(f"在本地文件库中找到匹配文件，成功复制: {target_path}\n")
                     self.downloaded_books.add(book['title'])
                     return True
                 else:
@@ -310,6 +315,8 @@ class BooklistDownloader:
                     return True
 
             # 如果本地没有找到，继续原有的下载逻辑
+            print(f"本地文件库中未找到匹配文件《{safe_filename}》，继续从网络下载……\n")
+
             # 检查必要的字段
             if not book.get('book_id') or not book.get('title'):
                 print(f"错误：缺少必要的书籍信息")
@@ -324,7 +331,7 @@ class BooklistDownloader:
                 print(f"文件已存在: {file_path}，跳过")
                 return True
 
-            print(f"正在搜索书籍信息: 《{book['title']}》(ID: {book['book_id']})")
+            print(f"\n正在搜索书籍信息: 《{book['title']}》(ID: {book['book_id']})")
 
             # 通过search API获取完整书籍信息
             search_results = self.client.search(book['title'], extensions=[book['format']])
@@ -357,7 +364,7 @@ class BooklistDownloader:
             with file_path.open('wb') as f:
                 f.write(content)
 
-            print(f"下载成功: {file_path}")
+            print(f"下载成功: {file_path}\n")
 
             return True
 
@@ -406,27 +413,35 @@ class BooklistDownloader:
         success = 0
         failed = 0
 
-        # 开始下载
-        for i, book in enumerate(books, 1):
-            print(f"\n[{i}/{total}] 正在处理: 《{book['title']}.{book['format']}》 by {book['author']}")
+        # 使用线程池进行并行下载
+        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+            # 提交所有下载任务
+            future_to_book = {
+                executor.submit(self.download_book, book): book
+                for book in books
+                if book['title'] not in self.downloaded_books
+            }
 
-            if book['title'] in self.downloaded_books:
-                print(f"已下载: 《{book['title']}》，跳过")
-                continue
+            # 处理完成的任务
+            for future in as_completed(future_to_book):
+                book = future_to_book[future]
+                try:
+                    if future.result():
+                        with self.lock:
+                            success += 1
+                    else:
+                        with self.lock:
+                            failed += 1
+                except Exception as e:
+                    print(f"下载《{book['title']}》时发生错误: {e}")
+                    with self.lock:
+                        failed += 1
 
-            if self.download_book(book):
-                success += 1
-            else:
-                failed += 1
-
-            # 检查剩余配额
-            downloads_left = self.client.getDownloadsLeft()
-            if downloads_left <= 0:
-                print(f"\n下载配额已用完，停止后续下载")
-                break
-
-            # 只有在实际进行下载时才添加延时
-            time.sleep(2)
+                # 检查剩余配额
+                downloads_left = self.client.getDownloadsLeft()
+                if downloads_left <= 0:
+                    print(f"\n下载配额已用完，停止后续下载")
+                    break
 
         # 输出统计信息
         print("\n下载完成!")
