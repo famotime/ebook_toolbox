@@ -12,7 +12,7 @@
 4. 搜索规则：
    - 文件名必须以搜索词开头（忽略标点符号和大小写）
    - 支持中文、英文和数字
-   - 文件类型优先级：epub > pdf > txt
+   - 文件类型优先级：epub > pdf > txt > mobi > azw3
    - 同类型文件优先选择更大的文件，大小相同则选择更新的文件
 5. 输出目录结构：
    - 统一输出到指定的父目录（BOOKS_OUTPUT_DIR）
@@ -69,9 +69,9 @@ def generate_file_list(search_dir, folders_to_update=None):
                 except:
                     continue
 
-    # 收集所有epub、pdf和txt文件
+    # 收集所有支持的电子书文件
     files = []
-    for ext in ['.epub', '.pdf', '.txt']:
+    for ext in ['.epub', '.pdf', '.txt', '.mobi', '.azw3']:
         try:
             if folders_to_update:
                 # 只搜索指定目录
@@ -159,7 +159,10 @@ def search_file(filename, search_dir, folders_to_update=None):
 
         # 初始化文件缓存
         print(f"正在读取文件索引列表：{file_list_path}，耗时较长，请等待……")
-        search_file._file_cache = {'.epub': [], '.pdf': [], '.txt': []}
+        search_file._file_cache = {
+            '.epub': [], '.pdf': [], '.txt': [],
+            '.mobi': [], '.azw3': []  # 添加 .mobi 和 .azw3
+        }
         with file_list_path.open('r', encoding='utf-8') as f:
             for line in f:
                 path_str, size, mtime = line.strip().split('|')
@@ -175,7 +178,7 @@ def search_file(filename, search_dir, folders_to_update=None):
 
     # 按优先级搜索匹配的文件
     matches = []
-    for ext in ['.epub', '.pdf', '.txt']:
+    for ext in ['.epub', '.pdf', '.txt', '.mobi', '.azw3']:  # 按指定顺序搜索
         for file_path, clean_stem, size, mtime in search_file._file_cache[ext]:
             if clean_stem.startswith(name):
                 matches.append((file_path, ext, size, mtime))
@@ -367,7 +370,7 @@ def process_book_list(list_file, search_dir, from_clipboard=False):
     if result_file.exists():
         with result_file.open('r', encoding='utf-8') as f:
             content = f.read()
-            # 提取"已找到并复制的文件"部分的书名
+            # 提取"已找到并复制的文件"部分的文件名
             if "已找到并复制的文件：" in content:
                 copied_section = content.split("已找到并复制的文件：")[1].split("\n\n")[0]
                 for line in copied_section.strip().split("\n"):
@@ -610,7 +613,7 @@ def process_book_list_directory(list_dir, search_dir):
                 error_log = BOOKS_OUTPUT_DIR / "_处理错误.txt"
                 with error_log.open('a', encoding='utf-8') as f:
                     f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} - {file_path.name}: {str(e)}\n")
-                # 发生错误时退出处理
+                # 发生错误退出处理
                 print("由于发生错误，停止处理后续文件")
                 break
 
