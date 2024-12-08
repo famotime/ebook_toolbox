@@ -165,17 +165,21 @@ class BooklistDownloader:
 
             try:
                 # 加载书单页面
-                self.logger.info("正在加载书单页面...")
                 driver.get(self.booklist_url)
-
                 # 等待页面加载完成
                 WebDriverWait(driver, 20).until(
                     EC.presence_of_element_located((By.TAG_NAME, "z-bookcard"))
                 )
 
+                try:
+                    booklist_title = tree.xpath('/html/head/title/text()')
+                    self.logger.info(f"正在加载书单页面: {booklist_title}")
+                except Exception as e:
+                    self.logger.info(f"正在加载书单页面……")
+
                 # 循环点击"Show more"按钮
                 retry_count = 0
-                max_retries = 20  # 修改为最多点击20次
+                max_retries = 50  # 最大点击次数
                 while retry_count < max_retries:
                     try:
                         # 等待"Show more"按钮出现
@@ -297,11 +301,11 @@ class BooklistDownloader:
             # 仅在启用本地索引时进行本地文件搜索
             if self.use_local_index and self.local_files_index:
                 # self.logger.info(f"正在从本地文件库搜索匹配文件《{safe_filename}》……")
-                local_key = (safe_filename, f".{file_extension}")
+                local_key = (book['title'], f".{file_extension}") if (book['title'], f".{file_extension}") in self.local_files_index else (safe_filename, f".{file_extension}")
                 if local_key in self.local_files_index:
                     # self.logger.info(f"已经在本地文件库中找到匹配文件《{safe_filename}》")
                     source_path = self.local_files_index[local_key]
-                    target_path = self.save_dir / f"{safe_filename}.{file_extension}"
+                    target_path = self.save_dir / f"{local_key[0]}.{local_key[1]}"
 
                     if not target_path.exists():
                         target_path.parent.mkdir(parents=True, exist_ok=True)
@@ -324,8 +328,7 @@ class BooklistDownloader:
                 return False
 
             # 构造文件名
-            safe_filename = self._safe_filename(f"{book['title']}.{book['format'].lower()}")
-            file_path = self.save_dir / safe_filename
+            file_path = self.save_dir / f"{safe_filename}.{file_extension}"
 
             # 检查文件是否已存在
             if file_path.exists():
@@ -335,23 +338,34 @@ class BooklistDownloader:
             self.logger.info(f"正在搜索书籍信息: 《{book['title']}》(ID: {book['book_id']})")
 
             # 通过search API获取完整书籍信息
+            book_detail = None
+
+            # 第一次搜索：使用完整书名（包含格式后缀）
             try:
                 search_results = self.client.search(book['title'], extensions=[book['format']])
+
+                if search_results and 'books' in search_results:
+                    # 优先使用book_id精确匹配
+                    for result in search_results['books']:
+                        if str(result.get('id')) == str(book['book_id']):
+                            book_detail = result
+                            break
             except Exception as e:
-                self.logger.error(f"搜索书籍时出错: {str(e)}")
-                return False
+                self.logger.warning(f"使用完整匹配搜索时出错: {str(e)}")
 
-            # 检查search_results的结构
-            if not search_results or 'books' not in search_results:
-                self.logger.error(f"搜索失败：未找到《{book['title']}》的相关信息")
-                return False
-
-            # 在搜索结果中查找匹配的book_id
-            book_detail = None
-            for result in search_results['books']:
-                if str(result.get('id')) == str(book['book_id']) or str(result.get('title')) == str(book['title']):
-                    book_detail = result
-                    break
+            # 如果第一次搜索未找到，尝试第二次搜索：仅使用书名
+            if not book_detail:
+                try:
+                    search_results = self.client.search(book['title'])
+                    if search_results and 'books' in search_results:
+                        # 使用标题匹配
+                        for result in search_results['books']:
+                            if str(result.get('title')) == str(book['title']):
+                                book_detail = result
+                                break
+                except Exception as e:
+                    self.logger.error(f"搜索书籍时出错: {str(e)}")
+                    return False
 
             if not book_detail:
                 self.logger.error(f"未找到匹配的书籍信息：《{book['title']}》")
@@ -366,6 +380,7 @@ class BooklistDownloader:
                 return False
 
             # 保存文件
+            file_path = self.save_dir / f"{safe_filename}.{book_detail['extension']}"
             with file_path.open('wb') as f:
                 f.write(content)
 
@@ -392,7 +407,7 @@ class BooklistDownloader:
             filename = filename.replace(char, '_')
         # 限制文件名长度
         if len(filename.encode('utf-8')) > 240:  # 留出一些空间给路径
-            filename = filename[:80] + '...' + filename[-10:]
+            filename = filename[:100] + '...' + filename[-10:]
         return filename
 
     def run(self):
