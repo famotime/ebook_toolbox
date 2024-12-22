@@ -407,7 +407,7 @@ class BooklistDownloader:
             filename = filename.replace(char, '_')
         # 限制文件名长度
         if len(filename.encode('utf-8')) > 240:  # 留出一些空间给路径
-            filename = filename[:100] + '...' + filename[-10:]
+            filename = filename[:200] + '...' + filename[-10:]
         return filename
 
     def run(self):
