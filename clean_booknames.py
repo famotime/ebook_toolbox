@@ -9,6 +9,17 @@ from pathlib import Path
 import re
 
 def clean_book_filenames(directory=None, index_file=None):
+    """批量清理电子书文件名中的冗余信息
+
+    支持两种工作模式：
+    1. 目录扫描模式：遍历指定目录及其子目录下的所有电子书文件
+    2. 索引文件模式：根据索引文件中记录的文件路径进行处理
+
+    Args:
+        directory (Path|str|None): 要处理的目录路径。如果为None，则仅使用索引文件模式
+        index_file (Path|str|None): 索引文件路径。如果为None，则仅使用目录扫描模式
+
+    """
     if not directory and not index_file:
         raise ValueError("必须提供目录路径或索引文件路径其中之一")
 
@@ -18,7 +29,7 @@ def clean_book_filenames(directory=None, index_file=None):
         'deleted_files': 0,
         'failed_files': 0,
         'skipped_files': 0,
-        'not_found_files': 0    # 新增：索引文件中记录的文件未找到的数量
+        'not_found_files': 0
     }
 
     ebook_extensions = ('.epub', '.mobi', '.azw3', '.pdf', '.txt')
@@ -59,7 +70,11 @@ def clean_book_filenames(directory=None, index_file=None):
 def process_single_file(file_path, stats, index_records=None):
     """处理单个文件的重命名逻辑"""
     original_name = file_path.stem
+
+    # 移除文件名中的 Z-Library 标记，如“_Z-Library”、“(Z-Library)”、“Z-Library”等
     new_name = re.sub(r'_?\s*\(Z-Library\).*$', '', original_name)
+    # 移除文件名中的数字结尾，如“_123456”、“(123456)”等
+    new_name = re.sub(r'_?\(?\d{5,20}\)?$', '', new_name)
 
     if new_name != original_name:
         new_path = file_path.with_name(new_name + file_path.suffix)
@@ -104,7 +119,7 @@ if __name__ == '__main__':
     # stats = clean_book_filenames(index_file=index_file)
 
     # 或仅使用目录扫描模式
-    directory = Path(r"J:\书单")
+    directory = Path(r"J:\电子书\2024年")
     stats = clean_book_filenames(directory=directory)
 
     # 或同时使用两种模式
