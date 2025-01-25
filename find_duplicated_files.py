@@ -17,7 +17,7 @@
 
 from pathlib import Path
 import json
-from typing import Dict, List, Set, Tuple
+from typing import Dict, List, Set, Tuple, Union
 from dataclasses import dataclass
 import hashlib
 from datetime import datetime
@@ -158,8 +158,8 @@ class DuplicateFinder:
 
     def find_duplicates(
         self,
-        include_path: str = None,
-        exclude_path: str = None,
+        include_path: Union[str, List[str]] = None,
+        exclude_path: Union[str, List[str]] = None,
         shortest_path: bool = True,
         compare_content: bool = True,
         recursive: bool = True,
@@ -168,8 +168,8 @@ class DuplicateFinder:
         """查找重复文件
 
         Args:
-            include_path: 要包含的路径关键词
-            exclude_path: 要排除的路径关键词
+            include_path: 要包含的路径关键词或关键词列表
+            exclude_path: 要排除的路径关键词或关键词列表
             shortest_path: True表示保留最短路径，False表示保留最长路径
             compare_content: True表示比较文件内容，False仅比较文件名和大小
             recursive: True表示递归搜索子目录，False仅搜索当前目录
@@ -248,26 +248,33 @@ class DuplicateFinder:
                 hasher.update(chunk)
         return hasher.hexdigest()
 
-    def _select_file(self, files: List[FileInfo], include_path: str = None, exclude_path: str = None, shortest_path: bool = True) -> Path:
+    def _select_file(self, files: List[FileInfo], include_path: Union[str, List[str]] = None,
+                    exclude_path: Union[str, List[str]] = None, shortest_path: bool = True) -> Path:
         """选择要保留的文件
 
         Args:
             files: 重复文件列表
-            include_path: 要包含的路径关键词
-            exclude_path: 要排除的路径关键词
+            include_path: 要包含的路径关键词或关键词列表
+            exclude_path: 要排除的路径关键词或关键词列表
             shortest_path: True表示保留最短路径，False表示保留最长路径
         """
         candidates = files.copy()
 
+        # 转换输入为列表格式
+        exclude_paths = [exclude_path] if isinstance(exclude_path, str) else exclude_path
+        include_paths = [include_path] if isinstance(include_path, str) else include_path
+
         # 首先应用排除规则
-        if exclude_path:
-            candidates = [f for f in candidates if exclude_path not in str(f.path)]
+        if exclude_paths:
+            candidates = [f for f in candidates
+                        if not any(ep in str(f.path) for ep in exclude_paths if ep)]
             if candidates:  # 如果还有文件剩余，就从这些文件中选择
                 files = candidates
 
         # 然后应用包含规则
-        if include_path:
-            included = [f for f in files if include_path in str(f.path)]
+        if include_paths:
+            included = [f for f in files
+                       if any(ip in str(f.path) for ip in include_paths if ip)]
             if included:  # 如果找到符合包含规则的文件，就从这些文件中选择
                 files = included
 
@@ -304,7 +311,7 @@ class DuplicateFinder:
         print(f"报告已保存到：{output_path}")
 
 if __name__ == "__main__":
-    paths_to_check = r"H:\个人图片及视频\temp"
+    paths_to_check = r"H:\个人图片及视频"
 
     print(f"\n处理目录：{paths_to_check}")
     finder = DuplicateFinder(paths_to_check)
@@ -313,9 +320,9 @@ if __name__ == "__main__":
         compare_content=False, # True表示比较文件内容，False仅比较文件名和大小
         recursive=True, # True表示递归搜索子目录，False仅搜索当前目录
         rebuild_index=False, # True表示强制重建索引
-        include_path=None, # 要包含的路径关键词
-        exclude_path="待整理", # 要排除的路径关键词(待删除文件所在目录)
-        shortest_path=False, # True表示保留最短路径，False表示保留最长路径
+        include_path=[], # 要包含的路径关键词（待保留文件所在目录）
+        exclude_path=["待整理"], # 要排除的路径关键词(优先删除文件所在目录)
+        shortest_path=False, # True表示保留最短路径文件，False表示保留最长路径文件
     )
 
     finder.export_to_markdown(duplicates)
