@@ -31,6 +31,8 @@
 
 ## 主要能力
 
+![image-20241126202601631](./assets/image-20241126202601631.png)
+
 ### 本地电子书搜索与整理 (collect_local_ebooks.py)
 
 - `collect_local_ebooks.py`：从文本文件或剪贴板提取《书名》清单，搜索本地电子书库并生成 `处理结果.txt` / `处理日志.txt`
@@ -55,6 +57,8 @@
 
 - `download_from_zlibrary_booklist.py`：解析 Z-Library 书单页面并批量下载
 
+  ![image-20241208124257577](./assets/image-20241208124257577-1775275903905-2.png)
+
   根据 Z-Library Booklists 中相关书单网址，自动解析书单页面包含的电子书并批量下载。
 
   - 复制一个或多个 Z-Library 书单页面URL到剪贴板
@@ -68,7 +72,7 @@
 
 整合了上述两个脚本的操作，首先根据本地书单文件在本地硬盘上搜索电子书，然后从Z-Library下载未找到的电子书。
 
-![image-20241208124257577](./assets/image-20241208124257577.png)
+
 
 ### 重复文件处理
 
