@@ -57,7 +57,7 @@
 
 - `download_from_zlibrary_booklist.py`：解析 Z-Library 书单页面并批量下载
 
-  ![image-20241208124257577](./assets/image-20241208124257577-1775275903905-2.png)
+  ![image-20241208124257577](./assets/image-20241208124257577.png)
 
   根据 Z-Library Booklists 中相关书单网址，自动解析书单页面包含的电子书并批量下载。
 
