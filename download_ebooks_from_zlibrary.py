@@ -15,7 +15,7 @@ from dataclasses import dataclass, asdict, field
 from datetime import datetime
 import time
 from Zlibrary import Zlibrary
-import json
+from env_config import load_zlibrary_env
 
 @dataclass
 class ZLibraryConfig:
@@ -27,34 +27,32 @@ class ZLibraryConfig:
 
     @classmethod
     def load_account_info(cls, config_path: Path = None):
-        """从配置文件加载账号信息，并获取remix token"""
+        """从项目 .env 文件加载账号信息，并获取 remix token"""
         if config_path is None:
-            config_path = Path(__file__).parent.parent / "account" / "web_accounts.json"
+            config_path = Path(__file__).resolve().parent / ".env"
 
         try:
-            with config_path.open('r', encoding='utf-8') as f:
-                accounts = json.load(f)
-                zlibrary_account = accounts.get("zlibrary", {})
+            zlibrary_account = load_zlibrary_env(config_path)
 
-                # 如果配置中有email和password，则先获取remix token
-                if zlibrary_account.get("email") and zlibrary_account.get("password"):
-                    temp_client = Zlibrary(
-                        email=zlibrary_account["email"],
-                        password=zlibrary_account["password"]
-                    )
-                    profile = temp_client.getProfile()["user"]
-                    return cls(
-                        remix_userid=str(profile["id"]),
-                        remix_userkey=profile["remix_userkey"]
-                    )
-
-                # 否则直接使用配置中的remix token
-                return cls(
-                    remix_userid=zlibrary_account.get("remix_userid", ""),
-                    remix_userkey=zlibrary_account.get("remix_userkey", "")
+            # 如果配置中有email和password，则先获取remix token
+            if zlibrary_account.get("email") and zlibrary_account.get("password"):
+                temp_client = Zlibrary(
+                    email=zlibrary_account["email"],
+                    password=zlibrary_account["password"]
                 )
+                profile = temp_client.getProfile()["user"]
+                return cls(
+                    remix_userid=str(profile["id"]),
+                    remix_userkey=profile["remix_userkey"]
+                )
+
+            # 否则直接使用配置中的remix token
+            return cls(
+                remix_userid=zlibrary_account.get("remix_userid", ""),
+                remix_userkey=zlibrary_account.get("remix_userkey", "")
+            )
         except Exception as e:
-            print(f"读取账号配置文件失败: {e}")
+            print(f"读取 .env 账号配置失败: {e}")
             return cls()
 
 @dataclass

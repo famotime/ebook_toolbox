@@ -51,15 +51,22 @@
 - 自动重试和错误处理
 - 生成下载报告和日志
 
-注意下载前须在`../account/web_accounts.json`（account是本代码文件夹的同级目录）中配置Zlibrary帐号信息：
+下载前请先在项目根目录创建`.env`文件，并填写 Z-Library 账号信息。可以直接参考仓库中的`.env.example`：
 
-```json
-{
-    "zlibrary": {"email": "your_email@example.com", "password": "your_password"}
-}
+```dotenv
+ZLIBRARY_EMAIL=your_email@example.com
+ZLIBRARY_PASSWORD=your_password
+
+# 如果你已经拿到 remix token，也可以直接填写：
+ZLIBRARY_REMIX_USERID=
+ZLIBRARY_REMIX_USERKEY=
 ```
 
-代码库中附带了一个示例目录和文件，你需要把它拷贝到父目录，并在web_account.json中修改你的账号信息。当然，你也可以不用这么麻烦，直接把账号密码信息写在源代码里。
+脚本会优先读取项目根目录下的`.env`文件：
+
+- 如果提供了`ZLIBRARY_EMAIL`和`ZLIBRARY_PASSWORD`，脚本会自动登录并换取 remix token
+- 如果已经有`ZLIBRARY_REMIX_USERID`和`ZLIBRARY_REMIX_USERKEY`，也可以直接使用 token 登录
+- `.env`已被`.gitignore`忽略，不会被提交到仓库
 
 Z-Library的普通账号每天下载配额是10本书，如果不够用，可以考虑购买VIP账号。
 
@@ -122,4 +129,3 @@ Z-Library的普通账号每天下载配额是10本书，如果不够用，可以
 - docx2txt：用于提取Word文档内容
 - selenium：用于自动化浏览器操作
 - lxml：用于解析HTML文档
-
