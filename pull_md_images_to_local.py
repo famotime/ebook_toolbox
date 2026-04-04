@@ -91,5 +91,5 @@ def process_markdown(md_file: Path, image_dir: Path = None) -> None:
 
 
 if __name__ == '__main__':
-    md_file = Path(r'J:\相对论究竟是什么【文字版】_(万维钢).md')
+    md_file = Path(r'H:\BaiduSyncdisk\小汤汁茶馆知识星球\已保存到为知\2025.2\汤汁发文 附书参考答案｜2024 年度十佳文章.md')
     process_markdown(md_file)
