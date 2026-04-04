@@ -1,5 +1,19 @@
 # ebook_toolbox 电子书处理工具箱
 
+## 快速开始
+
+1. 创建虚拟环境并安装依赖：
+
+   ```bash
+   pip install requests pyperclip ebooklib docx2txt selenium lxml
+   ```
+
+2. 复制项目根目录下的`.env.example`为`.env`，填写你的 Z-Library 账号信息。
+
+3. 按需修改脚本中的本地路径配置，例如书单目录、电子书库目录、输出目录。
+
+4. 运行对应脚本开始处理。
+
 ## 工具列表
 
 主要工具：
@@ -51,7 +65,7 @@
 - 自动重试和错误处理
 - 生成下载报告和日志
 
-下载前请先在项目根目录创建`.env`文件，并填写 Z-Library 账号信息。可以直接参考仓库中的`.env.example`：
+下载前请先在项目根目录创建`.env`文件，并填写 Z-Library 账号信息。推荐直接复制`.env.example`后再修改：
 
 ```dotenv
 ZLIBRARY_EMAIL=your_email@example.com
