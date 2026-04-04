@@ -18,15 +18,14 @@
 from pathlib import Path
 import json
 from typing import Dict, List, Set, Tuple, Union
-from dataclasses import dataclass
 import hashlib
 from datetime import datetime
-
-@dataclass
-class FileInfo:
-    path: Path
-    size: int
-    name: str
+from duplicate_finder_workflow import (
+    FileInfoRecord as FileInfo,
+    format_duplicate_report,
+    generate_index_name,
+    select_preferred_file,
+)
 
 class DuplicateFinder:
     def __init__(self, root_dir: str, rebuild_index: bool = False):
@@ -55,24 +54,7 @@ class DuplicateFinder:
 
         将路径转换为合法的文件名，保持唯一性
         """
-        # 获取规范化的绝对路径
-        full_path = str(path.resolve())
-
-        # 替换非法字符
-        # 将盘符中的冒号替换为下划线
-        # 将路径分隔符替换为下划线
-        # 移除其他可能的非法字符
-        illegal_chars = '<>:"/\\|?*'
-        for char in illegal_chars:
-            full_path = full_path.replace(char, '_')
-
-        # 如果文件名过长，使用哈希值缩短
-        if len(full_path) > 100:
-            import hashlib
-            hash_obj = hashlib.md5(full_path.encode('utf-8'))
-            return hash_obj.hexdigest()
-
-        return full_path
+        return generate_index_name(path)
 
     def _rebuild_index(self) -> None:
         """强制重建索引"""
@@ -278,8 +260,7 @@ class DuplicateFinder:
             if included:  # 如果找到符合包含规则的文件，就从这些文件中选择
                 files = included
 
-        paths = [f.path for f in files]
-        return min(paths, key=lambda p: len(str(p))) if shortest_path else max(paths, key=lambda p: len(str(p)))
+        return select_preferred_file(files, include_paths, exclude_paths, shortest_path)
 
     def export_to_markdown(self, duplicates: Dict[str, List[Path]], output_file: str = None) -> None:
         """导出重复文件信息到Markdown文件
@@ -296,17 +277,7 @@ class DuplicateFinder:
         output_path = self.output_dir / output_file
 
         with output_path.open('w', encoding='utf-8') as f:
-            f.write("# 重复文件报告\n\n")
-            f.write(f"搜索目录: {self.root_dir}\n")
-            f.write(f"生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
-
-            for kept_file, duplicate_files in duplicates.items():
-                # 保留文件标记为未选中
-                f.write(f"- [ ] {kept_file}\n")
-                # 重复文件标记为选中（待删除）
-                for dup in duplicate_files:
-                    f.write(f"- [x] {dup}\n")
-                f.write("\n---\n\n")
+            f.write(format_duplicate_report(self.root_dir, duplicates))
 
         print(f"报告已保存到：{output_path}")
 

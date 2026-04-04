@@ -1,11 +1,17 @@
 """
 将markdown文件中的图片下载到本地，并修改图片路径
 """
+import argparse
 from pathlib import Path
 import re
 import requests
 import hashlib
 from urllib.parse import unquote
+
+
+DEFAULT_MD_FILE = Path(
+    r'H:\BaiduSyncdisk\小汤汁茶馆知识星球\已保存到为知\2025.2\汤汁发文 附书参考答案｜2024 年度十佳文章.md'
+)
 
 def download_image(url: str, save_dir: Path) -> Path:
     """
@@ -41,6 +47,9 @@ def process_markdown(md_file: Path, image_dir: Path = None) -> None:
     """
     处理Markdown文件中的图片
     """
+    if not md_file.exists():
+        raise FileNotFoundError(f"Markdown文件不存在: {md_file}")
+
     print(f"\n开始处理Markdown文件: {md_file}")
 
     if image_dir is None:
@@ -90,6 +99,17 @@ def process_markdown(md_file: Path, image_dir: Path = None) -> None:
     print(f"- 下载失败: {failed_count} 个")
 
 
+def build_parser():
+    parser = argparse.ArgumentParser(description="下载 Markdown 中的远程图片到本地")
+    parser.add_argument("--md-file", type=Path, default=DEFAULT_MD_FILE, help="要处理的 Markdown 文件")
+    parser.add_argument("--image-dir", type=Path, default=None, help="图片保存目录，默认在 Markdown 同级 images/")
+    return parser
+
+
+def main(argv=None):
+    args = build_parser().parse_args(argv)
+    process_markdown(args.md_file, args.image_dir)
+
+
 if __name__ == '__main__':
-    md_file = Path(r'H:\BaiduSyncdisk\小汤汁茶馆知识星球\已保存到为知\2025.2\汤汁发文 附书参考答案｜2024 年度十佳文章.md')
-    process_markdown(md_file)
+    main()

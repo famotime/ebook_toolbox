@@ -37,6 +37,16 @@ import shutil
 import re
 import time
 import pyperclip
+from local_ebooks_workflow import (
+    SINGLE_BOOK_DIRNAME,
+    classify_list_file,
+    extract_existing_copied_section,
+    extract_previously_copied_books,
+    resolve_output_dir,
+)
+
+
+BOOKS_OUTPUT_DIR = None
 
 
 def generate_file_list(search_dir, folders_to_update=None):
@@ -242,7 +252,7 @@ def extract_book_names(content: str) -> list[str]:
     html_entity_pattern = r'&[a-zA-Z]+;'
 
     # 要清理的特殊字符（可以根据需要添加更多）
-    special_chars = r'[*\[\]【】\{\}『』「」\\\|\.\+#@\$%\^&\s]'
+    special_chars = r'[/\*\[\]【】\{\}『』「」\\\|\.\+#@\$%\^&\s]'
 
     # 清理每个书名中的HTML标签、特殊字符和多余空格
     cleaned_names = []
@@ -315,15 +325,24 @@ def get_books_from_clipboard():
         print(f"从剪贴板获取内容失败: {e}")
         return None, []
 
-def process_book_list(list_file, search_dir, from_clipboard=False):
+def _resolve_books_output_dir(output_dir=None) -> Path:
+    resolved_output_dir = output_dir if output_dir is not None else BOOKS_OUTPUT_DIR
+    if resolved_output_dir is None:
+        raise ValueError("未配置 BOOKS_OUTPUT_DIR，请传入 output_dir 或先设置全局输出目录")
+    return Path(resolved_output_dir)
+
+
+def process_book_list(list_file, search_dir, from_clipboard=False, output_dir=None):
     """
     处理书籍清单
     Args:
         list_file: 清单文件路径（从剪贴板读取时作为输出目录的父目录）
         search_dir: 搜索目录路径
         from_clipboard: 是否从剪贴板读取内容
+        output_dir: 输出目录
     """
     search_path = Path(search_dir)
+    base_output_dir = _resolve_books_output_dir(output_dir)
     if not search_path.exists():
         raise FileNotFoundError(f"搜索目录不存在: {search_dir}")
 
@@ -337,11 +356,13 @@ def process_book_list(list_file, search_dir, from_clipboard=False):
         if not dir_name or not book_names:
             return
 
-        # 修改：根据书籍数量决定输出目录
-        if len(book_names) <= 1:
-            output_dir = BOOKS_OUTPUT_DIR / "单本好书"
-        else:
-            output_dir = parent_dir / dir_name
+        output_dir = resolve_output_dir(
+            base_output_dir=base_output_dir,
+            list_path=parent_dir,
+            book_names=book_names,
+            from_clipboard=True,
+            clipboard_dir_name=dir_name,
+        )
     else:
         list_path = Path(list_file)
         if not list_path.exists():
@@ -352,11 +373,12 @@ def process_book_list(list_file, search_dir, from_clipboard=False):
             content = f.read()
 
         book_names = extract_book_names(content)
-        # 修改：根据书籍数量决定输出目录
-        if len(book_names) <= 1:
-            output_dir = BOOKS_OUTPUT_DIR / "单本好书"
-        else:
-            output_dir = BOOKS_OUTPUT_DIR / list_path.stem
+        output_dir = resolve_output_dir(
+            base_output_dir=base_output_dir,
+            list_path=list_path,
+            book_names=book_names,
+            from_clipboard=False,
+        )
 
     # 创建输出目录
     output_dir.mkdir(exist_ok=True)
@@ -369,14 +391,7 @@ def process_book_list(list_file, search_dir, from_clipboard=False):
     previously_copied = set()
     if result_file.exists():
         with result_file.open('r', encoding='utf-8') as f:
-            content = f.read()
-            # 提取"已找到并复制的文件"部分的文件名
-            if "已找到并复制的文件：" in content:
-                copied_section = content.split("已找到并复制的文件：")[1].split("\n\n")[0]
-                for line in copied_section.strip().split("\n"):
-                    if line.startswith("- 《"):
-                        book = line[3:-1]  # 去掉"- 《"和"》"
-                        previously_copied.add(book)
+            previously_copied = extract_previously_copied_books(f.read())
 
     # 获取输出目录中已存在的文件
     existing_files = {clean_filename(f.stem): f.stem for f in output_dir.glob('*.*')}
@@ -436,10 +451,7 @@ def process_book_list(list_file, search_dir, from_clipboard=False):
     if result_file.exists():
         with result_file.open('r', encoding='utf-8') as f:
             existing_content = f.read()
-            if "已找到并复制的文件：" in existing_content:
-                parts = existing_content.split("已找到并复制的文件：")
-                if len(parts) > 1:
-                    existing_copied_files = parts[1].split("\n\n")[0].strip()
+            existing_copied_files = extract_existing_copied_section(existing_content)
 
     # 将结果写入结果文件
     with result_file.open('w', encoding='utf-8') as f:
@@ -477,12 +489,14 @@ def process_book_list(list_file, search_dir, from_clipboard=False):
     print(f"\n处理日志已保存到：{log_file}")
     print(f"处理结果已保存到：{result_file}")
 
-def monitor_clipboard(search_dir):
+def monitor_clipboard(search_dir, output_dir=None):
     """
     监控系统剪贴板，发现新的书单就处理
     Args:
         search_dir: 搜索目录路径
+        output_dir: 输出目录
     """
+    base_output_dir = _resolve_books_output_dir(output_dir)
     last_content = ""
     print("开始监控剪贴板，粘贴包含《》内容开始处理，粘贴不包含《》的内容结束程序...")
 
@@ -496,7 +510,12 @@ def monitor_clipboard(search_dir):
                 # 检查是否包含书名标记
                 if "《" in current_content and "》" in current_content:
                     print("\n检测到新的书单，开始处理...")
-                    process_book_list(Path(search_dir) / "书单", search_dir, from_clipboard=True)
+                    process_book_list(
+                        Path(search_dir) / "书单",
+                        search_dir,
+                        from_clipboard=True,
+                        output_dir=base_output_dir,
+                    )
                     print("\n继续监控剪贴板...")
                 else:
                     print("\n检测到不包含书名的内容，退出程序")
@@ -511,19 +530,21 @@ def monitor_clipboard(search_dir):
             print(f"\n发生错误: {e}")
             continue
 
-def process_book_list_directory(list_dir, search_dir):
+def process_book_list_directory(list_dir, search_dir, output_dir=None):
     """
     处理指定目录下的所有书单文件
     Args:
         list_dir: 书单文件所在目录
         search_dir: 搜索目录路径
+        output_dir: 输出目录
     """
     list_path = Path(list_dir)
+    base_output_dir = _resolve_books_output_dir(output_dir)
     if not list_path.exists():
         raise FileNotFoundError(f"书单目录不存在: {list_dir}")
 
     # 进度记录文件
-    progress_file = BOOKS_OUTPUT_DIR / "本地书整理_处理进度.txt"
+    progress_file = base_output_dir / "本地书整理_处理进度.txt"
     processed_files = set()
 
     # 读取已处理的文件记录
@@ -551,17 +572,18 @@ def process_book_list_directory(list_dir, search_dir):
     current_processed = 0
 
     # 获取所有已存在的书单目录名
-    existing_dirs = {path.name.lower() for path in BOOKS_OUTPUT_DIR.iterdir() if path.is_dir()}
+    existing_dirs = {path.name.lower() for path in base_output_dir.iterdir() if path.is_dir()}
 
     try:
         # 处理每个书单文件
         for i, file_path in enumerate(book_list_files, 1):
-            if str(file_path) in processed_files:
+            file_state = classify_list_file(file_path, processed_files, existing_dirs)
+            if file_state == "processed":
                 print(f"\n[{i}/{total_files}] 跳过已处理的文件: {file_path.name}")
                 continue
 
             # 检查是否已存在同名目录
-            elif file_path.stem.lower() in existing_dirs:
+            elif file_state == "existing_dir":
                 print(f"\n[{i}/{total_files}] 跳过已存在目录的文件: {file_path.name}")
                 # 记录为已处理
                 with progress_file.open('a', encoding='utf-8') as f:
@@ -577,13 +599,15 @@ def process_book_list_directory(list_dir, search_dir):
                 book_names = extract_book_names(content)
 
                 # 确定目标目录
-                if len(book_names) <= 1:
-                    target_dir = BOOKS_OUTPUT_DIR / "单本好书"
-                else:
-                    target_dir = BOOKS_OUTPUT_DIR / file_path.stem
+                target_dir = resolve_output_dir(
+                    base_output_dir=base_output_dir,
+                    list_path=file_path,
+                    book_names=book_names,
+                    from_clipboard=False,
+                )
 
                 # 处理书单
-                process_book_list(file_path, search_dir, from_clipboard=False)
+                process_book_list(file_path, search_dir, from_clipboard=False, output_dir=base_output_dir)
 
                 # 移动书单文件到对应目录
                 target_dir.mkdir(exist_ok=True)
@@ -610,7 +634,7 @@ def process_book_list_directory(list_dir, search_dir):
             except Exception as e:
                 print(f"处理失败: {e}")
                 # 记录错误到日志文件
-                error_log = BOOKS_OUTPUT_DIR / "_处理错误.txt"
+                error_log = base_output_dir / "_处理错误.txt"
                 with error_log.open('a', encoding='utf-8') as f:
                     f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} - {file_path.name}: {str(e)}\n")
                 # 发生错误退出处理
@@ -633,7 +657,7 @@ if __name__ == "__main__":
     try:
         # 确保输出目录和单本好书目录都存在
         BOOKS_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-        (BOOKS_OUTPUT_DIR / "单本好书").mkdir(exist_ok=True)
+        (BOOKS_OUTPUT_DIR / SINGLE_BOOK_DIRNAME).mkdir(exist_ok=True)
 
         # 检查是否需要更新文件索引列表
         if check_file_list_update(search_dir):
@@ -650,10 +674,10 @@ if __name__ == "__main__":
 
         if mode == "1":
             # 处理书单文件
-            process_book_list_directory(list_dir, search_dir)
+            process_book_list_directory(list_dir, search_dir, output_dir=BOOKS_OUTPUT_DIR)
         elif mode == "2":
             # 启动剪贴板监控，使用统一的输出目录
-            monitor_clipboard(search_dir)
+            monitor_clipboard(search_dir, output_dir=BOOKS_OUTPUT_DIR)
         else:
             print("无效的模式选择！")
 

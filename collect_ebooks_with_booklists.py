@@ -6,9 +6,9 @@
 
 from pathlib import Path
 import time
-import sys
 from collect_local_ebooks import process_book_list_directory, check_file_list_update, generate_file_list
 from download_ebooks_from_zlibrary import main as download_from_zlibrary
+from local_ebooks_workflow import SINGLE_BOOK_DIRNAME
 
 
 def process_ebooks(list_dir: str | Path, search_dir: str | Path, output_dir: str | Path):
@@ -31,18 +31,14 @@ def process_ebooks(list_dir: str | Path, search_dir: str | Path, output_dir: str
 
     # 确保输出目录存在
     output_dir.mkdir(parents=True, exist_ok=True)
-    (output_dir / "单本好书").mkdir(exist_ok=True)
-
-    # 设置全局变量 BOOKS_OUTPUT_DIR
-    # 这里使用 sys.modules 来修改 collect_local_ebooks 模块中的全局变量
-    sys.modules['collect_local_ebooks'].BOOKS_OUTPUT_DIR = output_dir
+    (output_dir / SINGLE_BOOK_DIRNAME).mkdir(exist_ok=True)
 
     # 检查是否需要更新文件索引
     if check_file_list_update(search_dir):
         generate_file_list(search_dir)
 
     # 处理本地电子书
-    process_book_list_directory(list_dir, search_dir)
+    process_book_list_directory(list_dir, search_dir, output_dir=output_dir)
 
     print("\n"+"="*50)
     print("第二步：从Z-Library下载未找到的电子书")

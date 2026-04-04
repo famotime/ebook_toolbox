@@ -15,15 +15,19 @@ epub文件名目录信息添加工具
 - 所有操作都会记录在目标目录下的 rename_log.log 文件中
 """
 
+import argparse
 from pathlib import Path
-import ebooklib
-from ebooklib import epub
 import re
 from datetime import datetime
 
 
+DEFAULT_TARGET_DIRS = [Path(r'J:\zlibrary')]
+
+
 def get_toc_titles(epub_path):
     """获取epub文件的一级目录标题"""
+    from ebooklib import epub
+
     book = epub.read_epub(epub_path)
     toc = book.toc
 
@@ -53,8 +57,14 @@ def should_process_file(filename):
     keywords = ['全集', '套装', '作品集', '合集', '系列', '丛书', '全套']
     return any(keyword in filename for keyword in keywords)
 
-def main():
-    for target_dir in TARGET_DIRS:
+def build_parser():
+    parser = argparse.ArgumentParser(description="为 EPUB 合集文件名补充目录信息")
+    parser.add_argument("--target-dir", dest="target_dirs", nargs="+", type=Path, default=DEFAULT_TARGET_DIRS, help="要处理的目录列表")
+    return parser
+
+
+def main(target_dirs=None):
+    for target_dir in (target_dirs or DEFAULT_TARGET_DIRS):
         # 展开用户路径并创建日志文件
         target_dir = target_dir.expanduser().resolve()
         log_file = target_dir / 'rename_log.log'
@@ -144,10 +154,10 @@ def main():
 
         print(f"\n日志已保存到: {log_file}")
 
-if __name__ == '__main__':
-    # 在这里指定要处理的目录路径
-    TARGET_DIRS = [
-        Path(r'J:\zlibrary'),
-    ]
 
-    main()
+def run_cli(argv=None):
+    args = build_parser().parse_args(argv)
+    main(target_dirs=args.target_dirs)
+
+if __name__ == '__main__':
+    run_cli()

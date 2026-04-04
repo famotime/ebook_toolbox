@@ -14,42 +14,27 @@ from pathlib import Path
 from dataclasses import dataclass, asdict, field
 from datetime import datetime
 import time
-from Zlibrary import Zlibrary
-from env_config import load_zlibrary_env
+import json
+from zlibrary_runtime import (
+    ZLibraryAuth,
+    create_zlibrary_client,
+    find_pending_result_files,
+    load_zlibrary_auth,
+)
 
 @dataclass
-class ZLibraryConfig:
+class ZLibraryConfig(ZLibraryAuth):
     target_dir: Path = Path("ebooks")
     result_file: Path = Path("处理结果.txt")
-    # 移除email和password字段，只保留remix token相关字段
-    remix_userid: str = ""
-    remix_userkey: str = ""
 
     @classmethod
     def load_account_info(cls, config_path: Path = None):
         """从项目 .env 文件加载账号信息，并获取 remix token"""
-        if config_path is None:
-            config_path = Path(__file__).resolve().parent / ".env"
-
         try:
-            zlibrary_account = load_zlibrary_env(config_path)
-
-            # 如果配置中有email和password，则先获取remix token
-            if zlibrary_account.get("email") and zlibrary_account.get("password"):
-                temp_client = Zlibrary(
-                    email=zlibrary_account["email"],
-                    password=zlibrary_account["password"]
-                )
-                profile = temp_client.getProfile()["user"]
-                return cls(
-                    remix_userid=str(profile["id"]),
-                    remix_userkey=profile["remix_userkey"]
-                )
-
-            # 否则直接使用配置中的remix token
+            auth = load_zlibrary_auth(config_path)
             return cls(
-                remix_userid=zlibrary_account.get("remix_userid", ""),
-                remix_userkey=zlibrary_account.get("remix_userkey", "")
+                remix_userid=auth.remix_userid,
+                remix_userkey=auth.remix_userkey,
             )
         except Exception as e:
             print(f"读取 .env 账号配置失败: {e}")
@@ -104,10 +89,7 @@ class ZLibraryDownloader:
         if not self.config.remix_userid or not self.config.remix_userkey:
             raise ValueError("缺少必要的认证信息：remix_userid 和 remix_userkey")
 
-        self.client = Zlibrary(
-            remix_userid=self.config.remix_userid,
-            remix_userkey=self.config.remix_userkey
-        )
+        self.client = create_zlibrary_client(self.config)
         # 初始化时获取剩余下载次数
         self.downloads_left = self.client.getDownloadsLeft()
 
@@ -245,10 +227,6 @@ class ZLibraryDownloader:
             # 添加延时避免请求过于频繁
             time.sleep(2)
 
-def find_result_files(root_dir: Path) -> list[Path]:
-    """搜索指定目录及子目录下的所有处理结果文件"""
-    return list(root_dir.rglob("处理结果.txt"))
-
 def main(root_dir: Path | str, progress_file: Path = None):
     """
     主程序入口
@@ -269,8 +247,7 @@ def main(root_dir: Path | str, progress_file: Path = None):
     final_downloads_left = 0
 
     # 查找和处理文件
-    result_files = find_result_files(root_dir)
-    result_files = [f for f in result_files if str(f) not in stats.processed_file_list]
+    result_files = find_pending_result_files(root_dir, stats.processed_file_list)
     stats.total_files = len(result_files)
     print(f"找到 {stats.total_files} 个待处理书单文件")
 
@@ -299,10 +276,7 @@ def main(root_dir: Path | str, progress_file: Path = None):
             time.sleep(5)
     else:
         try:
-            temp_client = Zlibrary(
-                remix_userid=config.remix_userid,
-                remix_userkey=config.remix_userkey
-            )
+            temp_client = create_zlibrary_client(config)
             final_downloads_left = temp_client.getDownloadsLeft()
         except Exception as e:
             print(f"获取下载配额失败: {e}")

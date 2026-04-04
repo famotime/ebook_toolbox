@@ -1,145 +1,118 @@
 # ebook_toolbox 电子书处理工具箱
 
+面向个人电子书库整理的脚本集合，覆盖本地书单检索、Z-Library 补全下载、书单页抓取、重复文件报告和若干独立清理工具。
+
 ## 快速开始
 
-1. 创建虚拟环境并安装依赖：
+1. 安装依赖：
 
    ```bash
-   pip install requests pyperclip ebooklib docx2txt selenium lxml
+   pip install requests pyperclip selenium lxml docx2txt ebooklib send2trash pywin32
    ```
 
-2. 复制项目根目录下的`.env.example`为`.env`，填写你的 Z-Library 账号信息。
+2. 复制项目根目录下的 `.env.example` 为 `.env`，填写 Z-Library 账号信息：
 
-3. 按需修改脚本中的本地路径配置，例如书单目录、电子书库目录、输出目录。
+   ```dotenv
+   ZLIBRARY_EMAIL=your_email@example.com
+   ZLIBRARY_PASSWORD=your_password
 
-4. 运行对应脚本开始处理。
+   # 或者直接使用 remix token
+   ZLIBRARY_REMIX_USERID=
+   ZLIBRARY_REMIX_USERKEY=
+   ```
 
-## 工具列表
+3. 按需运行脚本，并通过命令行参数覆盖默认路径。
 
-主要工具：
+4. 跑测试验证当前改动：
 
-1. `collect_ebooks_with_booklists.py`: 根据本地书单文件批量下载电子书工具
-  - `collect_local_ebooks.py`: 本地电子书搜索与整理工具
-  - `download_ebooks_from_zlibrary.py`: Z-Library电子书下载工具
-2. `download_from_zlibrary_booklist.py`: 根据Z-Library官网书单批量下载电子书工具
+   ```bash
+   python -m unittest discover -s tests
+   ```
 
-辅助工具：
+## 主要能力
 
-1. `rename_epub_with_catalog.py`: EPUB合集文件名处理工具
-2. `clean_booknames.py`: 书名清理工具
-3. `pull_md_images_to_local.py`: Markdown文档图片本地化工具
-4. `doc2md.py`: Word文档转Markdown工具
+### 本地电子书搜索与整理 (collect_local_ebooks.py)
 
-书单合集：
+- `collect_local_ebooks.py`：从文本文件或剪贴板提取《书名》清单，搜索本地电子书库并生成 `处理结果.txt` / `处理日志.txt`
 
-`1000+书单合集_famotime.rar`：本压缩包包含了我多年积攒的1000+书单，不知道读什么时可以按单索书。也可以从这个书单开始构建你的电子书库。
-
-
-
-## 主要工具说明
-
-![image-20241126202601631](./image/image-20241126202601631.png)
-
-### 电子书搜索与整理 (collect_local_ebooks.py)
-
-根据书单内容在本地硬盘上查找指定的电子书文件，并将它们复制到到对应书单目录中。
-
-- 支持从剪贴板或文本文件读取书名清单（使用《》标记的书名）
-
-- 按文件类型优先级搜索：epub > pdf > txt
-
-注意事项：
-
-- 首次运行会生成本地硬盘文件索引，耗时较长，请耐心等待
-- 书名清单需要使用《》标记；使用剪贴板模式时，检测到不含《》的文本会终止运行；
-- 搜索时会忽略文件名中的标点符号和大小写
-- 文件名匹配规则：必须以搜索词开头
-- 同一本书存在多个版本时，优先选择更大的文件
+- 根据书单内容在本地硬盘上查找指定的电子书文件，并将它们复制到到对应书单目录中。
+  - 支持从剪贴板或文本文件读取书名清单（使用《》标记的书名）
+  - 按文件类型优先级搜索：epub > pdf > txt
+- 注意事项：
+  - 首次运行会生成本地硬盘文件索引，耗时较长，请耐心等待
+  - 书名清单需要使用《》标记；使用剪贴板模式时，检测到不含《》的文本会终止运行；
+  - 搜索时会忽略文件名中的标点符号和大小写
+  - 文件名匹配规则：必须以搜索词开头
+  - 同一本书存在多个版本时，优先选择更大的文件
 
 ### Z-Library电子书下载 (download_ebooks_from_zlibrary.py)
 
 自动读取书单目录中的缺失的电子书，从Z-Library自动搜索并批量下载。
 
-- 自动处理登录和搜索过程
-- 自动读取书单目录中的缺失文件，批量下载电子书
-- 自动重试和错误处理
-- 生成下载报告和日志
+- `download_ebooks_from_zlibrary.py`：读取书单目录下的 `处理结果.txt`，对“未找到的文件”，从Z-Library自动搜索并批量下载。
 
-下载前请先在项目根目录创建`.env`文件，并填写 Z-Library 账号信息。推荐直接复制`.env.example`后再修改：
+  Z-Library的普通账号每天下载配额是10本书，如果不够用，可以考虑购买VIP账号。
 
-```dotenv
-ZLIBRARY_EMAIL=your_email@example.com
-ZLIBRARY_PASSWORD=your_password
+- `download_from_zlibrary_booklist.py`：解析 Z-Library 书单页面并批量下载
 
-# 如果你已经拿到 remix token，也可以直接填写：
-ZLIBRARY_REMIX_USERID=
-ZLIBRARY_REMIX_USERKEY=
-```
+  根据 Z-Library Booklists 中相关书单网址，自动解析书单页面包含的电子书并批量下载。
 
-脚本会优先读取项目根目录下的`.env`文件：
-
-- 如果提供了`ZLIBRARY_EMAIL`和`ZLIBRARY_PASSWORD`，脚本会自动登录并换取 remix token
-- 如果已经有`ZLIBRARY_REMIX_USERID`和`ZLIBRARY_REMIX_USERKEY`，也可以直接使用 token 登录
-- `.env`已被`.gitignore`忽略，不会被提交到仓库
-
-Z-Library的普通账号每天下载配额是10本书，如果不够用，可以考虑购买VIP账号。
+  - 复制一个或多个 Z-Library 书单页面URL到剪贴板
+  - 通过URL访问书单Web页面，解析其中的电子书信息，并逐个下载电子书
+  - 自动处理登录和电子书搜索匹配
+  - 下载前搜索匹配本地文件索引，只下载本地没有的文件，避免重复下载
 
 ### 根据本地书单文件批量下载电子书工具（collect_ebooks_with_booklists.py）
 
+- `collect_ebooks_with_booklists.py`：先本地搜索，再对缺失项调用 Z-Library 下载
+
 整合了上述两个脚本的操作，首先根据本地书单文件在本地硬盘上搜索电子书，然后从Z-Library下载未找到的电子书。
 
-![image-20241208124257577](./image/image-20241208124257577.png)
+![image-20241208124257577](./assets/image-20241208124257577.png)
 
-### 根据Z-Library官网书单批量下载电子书 (download_from_zlibrary_booklist.py)
+### 重复文件处理
 
-根据 Z-Library Booklists 中相关书单网址，自动解析书单页面包含的电子书并批量下载。
+- `find_duplicated_files.py`：建立索引、识别重复文件、导出 Markdown 报告
+- `remove_duplicates_on_report.py`：按报告中的 `- [x]` 项把文件移入回收站
 
-- 复制一个或多个 Z-Library 书单页面URL到剪贴板
-- 通过URL访问书单Web页面，解析其中的电子书信息，并逐个下载电子书
-- 自动处理登录和电子书搜索匹配
-- 下载前搜索匹配本地文件索引，只下载本地没有的文件，避免重复下载
+### 独立小工具
 
+- `clean_booknames.py`：清理电子书文件名中的 `(Z-Library)`、编号尾缀等冗余信息
 
+- `rename_epub_with_catalog.py`：为 EPUB 合集文件名补充一级目录信息
 
-## 辅助工具说明
+  这个脚本用于处理EPUB电子书合集的文件名，自动添加合集内容（一级目录）信息。
 
-**EPUB合集文件名补充内容信息 (rename_epub_with_catalog.py)**
+  - 自动处理文件名中包含"全集"、"套装"、"作品集"等关键词的文件
+  - 读取EPUB文件的一级目录信息，添加到文件名中（格式：原文件名 [目录信息].epub）
 
-这个脚本用于处理EPUB电子书合集的文件名，自动添加合集内容（一级目录）信息。
+  使用示例：
 
-- 自动处理文件名中包含"全集"、"套装"、"作品集"等关键词的文件
-- 读取EPUB文件的一级目录信息，添加到文件名中（格式：原文件名 [目录信息].epub）
+  ```
+  原文件名
+     鲁迅全集(Z-Library).epub
+  处理后的文件名
+     鲁迅全集 [朝花夕拾\_野草\_故事新编\_华盖集].epub
+  如果目录过长，会截断
+     鲁迅全集 [朝花夕拾\_野草...].epub
+  ```
 
-使用示例：
-   ```bash
-   # 原文件名
-   鲁迅全集(Z-Library).epub
+- `pull_md_images_to_local.py`：将 Markdown 中的远程图片下载到本地并改写链接
 
-   # 处理后的文件名
-   鲁迅全集 [朝花夕拾_野草_故事新编_华盖集].epub
+- `doc2md.py`：将目录中的 `.doc/.docx` 合并为单个 Markdown
 
-   # 如果目录过长，会截断
-   鲁迅全集 [朝花夕拾_野草...].epub
-   ```
+## 示例命令
 
-**书名清理工具 (clean_booknames.py)**
+```bash
+python collect_ebooks_with_booklists.py
+python download_ebooks_from_zlibrary.py
+python download_from_zlibrary_booklist.py
+python clean_booknames.py --directory "J:\电子书\2024年"
+python pull_md_images_to_local.py --md-file "D:\notes\article.md"
+python doc2md.py --input-dir "G:\Download\创作"
+python rename_epub_with_catalog.py --target-dir "J:\zlibrary" "K:\ebooks"
+```
 
-用于清理和标准化书名格式。
+## 书单素材
 
-**Markdown图片本地化工具 (pull_md_images_to_local.py)**
-
-用于处理Markdown文档中的远程图片链接，将图片下载到本地并更新链接。
-
-**Word转Markdown工具 (doc2md.py)**
-
-用于将Word文档(.doc/.docx)转换/合并为Markdown文档。
-
-## 依赖库
-
-- pyperclip：用于剪贴板操作
-- requests：用于发送HTTP请求和下载文件
-- ebooklib：用于读取EPUB电子书
-- Zlibrary.py：Z-Library API封装库
-- docx2txt：用于提取Word文档内容
-- selenium：用于自动化浏览器操作
-- lxml：用于解析HTML文档
+`1000+书单合集_famotime.rar` 本压缩包包含了我多年积攒的1000+书单，不知道读什么时可以按单索书。也可以从这个书单开始构建你的电子书库。

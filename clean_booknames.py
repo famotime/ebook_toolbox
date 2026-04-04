@@ -5,8 +5,12 @@
 3. 移除文件名中的"(Z-Library)"及其后续文字
 4. 同时更新同目录下"处理结果.txt"文件中的相关记录
 """
+import argparse
 from pathlib import Path
 import re
+
+
+DEFAULT_DIRECTORY = Path(r"J:\电子书\2024年")
 
 def clean_book_filenames(directory=None, index_file=None):
     """批量清理电子书文件名中的冗余信息
@@ -60,6 +64,8 @@ def clean_book_filenames(directory=None, index_file=None):
     # 目录扫描模式
     if directory:
         dir_path = Path(directory)
+        if not dir_path.exists():
+            raise FileNotFoundError(f"目录不存在: {dir_path}")
         for file_path in dir_path.rglob('*'):
             if file_path.suffix.lower() in ebook_extensions:
                 stats['total_files'] += 1
@@ -113,19 +119,14 @@ def update_index_file(index_file, index_records):
         print(f'更新索引文件失败: {str(e)}')
 
 
-if __name__ == '__main__':
-    # 仅使用索引文件模式
-    # index_file = Path(r"J:\_file_list.txt")
-    # stats = clean_book_filenames(index_file=index_file)
+def build_parser():
+    parser = argparse.ArgumentParser(description="批量清理电子书文件名中的冗余信息")
+    parser.add_argument("--directory", type=Path, default=DEFAULT_DIRECTORY, help="要扫描的目录")
+    parser.add_argument("--index-file", type=Path, default=None, help="可选的文件索引路径")
+    return parser
 
-    # 或仅使用目录扫描模式
-    directory = Path(r"J:\电子书\2024年")
-    stats = clean_book_filenames(directory=directory)
 
-    # 或同时使用两种模式
-    # stats = clean_book_filenames(directory=directory, index_file=index_file)
-
-    # 打印统计信息
+def print_stats(stats):
     print('\n处理结果统计如下：')
     print(f'扫描的电子书文件总数：{stats["total_files"]}')
     print(f'成功重命名文件数：{stats["renamed_files"]}')
@@ -133,3 +134,13 @@ if __name__ == '__main__':
     print(f'无需重命名文件数：{stats["skipped_files"]}')
     print(f'重命名失败文件数：{stats["failed_files"]}')
     print(f'索引文件中未找到的文件数：{stats["not_found_files"]}')
+
+
+def main(argv=None):
+    args = build_parser().parse_args(argv)
+    stats = clean_book_filenames(directory=args.directory, index_file=args.index_file)
+    print_stats(stats)
+
+
+if __name__ == '__main__':
+    main()

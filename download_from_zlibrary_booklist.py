@@ -7,10 +7,7 @@
 
 from pathlib import Path
 import time
-from lxml import html
 import requests
-from dataclasses import dataclass
-from Zlibrary import Zlibrary
 from typing import List, Dict, Optional
 from shutil import copy2
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -19,43 +16,13 @@ import pyperclip
 from urllib.parse import urlparse, urljoin
 import logging
 from datetime import datetime
-from env_config import load_zlibrary_env
-
-@dataclass
-class ZLibraryConfig:
-    """Z-Library配置类"""
-    remix_userid: str = ""
-    remix_userkey: str = ""
-
-    @classmethod
-    def load_account_info(cls, config_path: Path = None):
-        """从项目 .env 文件加载账号信息"""
-        if config_path is None:
-            config_path = Path(__file__).resolve().parent / ".env"
-
-        try:
-            zlibrary_account = load_zlibrary_env(config_path)
-
-            # 如果配置中有email和password，则先获取remix token
-            if zlibrary_account.get("email") and zlibrary_account.get("password"):
-                temp_client = Zlibrary(
-                    email=zlibrary_account["email"],
-                    password=zlibrary_account["password"]
-                )
-                profile = temp_client.getProfile()["user"]
-                return cls(
-                    remix_userid=str(profile["id"]),
-                    remix_userkey=profile["remix_userkey"]
-                )
-
-            # 否则直接使用配置中的remix token
-            return cls(
-                remix_userid=zlibrary_account.get("remix_userid", ""),
-                remix_userkey=zlibrary_account.get("remix_userkey", "")
-            )
-        except Exception as e:
-            print(f"读取 .env 账号配置失败: {e}")
-            return cls()
+from zlibrary_booklist_workflow import (
+    build_target_file_path,
+    find_local_library_match,
+    parse_booklist_html,
+    safe_filename,
+)
+from zlibrary_runtime import ZLibraryAuth, create_zlibrary_client, load_zlibrary_auth
 
 def setup_logging(save_dir: Path) -> logging.Logger:
     """配置日志记录器"""
@@ -101,7 +68,11 @@ class BooklistDownloader:
         self.local_library_path = local_library_path
         self.use_local_index = use_local_index
         self.local_files_index = local_files_index if use_local_index else {}
-        self.config = ZLibraryConfig.load_account_info()
+        try:
+            self.config = load_zlibrary_auth()
+        except Exception as e:
+            print(f"读取 .env 账号配置失败: {e}")
+            self.config = ZLibraryAuth()
         self.downloaded_books = set()
         self.max_workers = 10  # 设置最大并行数
         self.total_books = 0
@@ -110,10 +81,7 @@ class BooklistDownloader:
         if not self.config.remix_userid or not self.config.remix_userkey:
             raise ValueError("缺少必要的认证信息：remix_userid 和 remix_userkey")
 
-        self.client = Zlibrary(
-            remix_userid=self.config.remix_userid,
-            remix_userkey=self.config.remix_userkey
-        )
+        self.client = create_zlibrary_client(self.config)
 
         # 获取并显示用户信息
         user_profile = self.client.getProfile()["user"]
@@ -168,12 +136,7 @@ class BooklistDownloader:
                 WebDriverWait(driver, 20).until(
                     EC.presence_of_element_located((By.TAG_NAME, "z-bookcard"))
                 )
-
-                try:
-                    booklist_title = tree.xpath('/html/head/title/text()')
-                    self.logger.info(f"正在加载书单页面: {booklist_title}")
-                except Exception as e:
-                    self.logger.info(f"正在加载书单页面……")
+                self.logger.info("正在加载书单页面……")
 
                 # 循环点击"Show more"按钮
                 retry_count = 0
@@ -205,61 +168,21 @@ class BooklistDownloader:
                         self.logger.info(f"达到最大点击次数限制({max_retries}次),继续处理已加载的内容……")
 
                 page_content = driver.page_source
-                tree = html.fromstring(page_content)
+                booklist_title, books = parse_booklist_html(page_content)
 
-                # 获取书单标题并使用处理后的安全文件名
-                booklist_title = tree.xpath('/html/head/title/text()')
                 if booklist_title:
-                    safe_title = self._safe_filename(booklist_title[0].strip())
-                    self.save_dir = self.save_dir / safe_title
-                    self.save_dir.mkdir(parents=True, exist_ok=True)
-                    self.downloaded_books = self._load_downloaded_books()
+                    self.logger.info(f"正在加载书单页面: {booklist_title}")
                 else:
-                    self.logger.warning("未能获取到书单标题，使用默认目录名")
-                    safe_title = "未命名书单"
-                    self.save_dir = self.save_dir / safe_title
-                    self.save_dir.mkdir(parents=True, exist_ok=True)
-                    self.downloaded_books = self._load_downloaded_books()
+                    self.logger.info("正在加载书单页面……")
 
-                # 获取所有书籍
-                books = []
-                book_elements = tree.xpath('//z-bookcard')
+                safe_title = safe_filename(booklist_title)
+                self.save_dir = self.save_dir / safe_title
+                self.save_dir.mkdir(parents=True, exist_ok=True)
+                self.downloaded_books = self._load_downloaded_books()
 
-                if not book_elements:
+                if not books:
                     self.logger.warning("未找到任何书籍元素，可能是页面结构发生变化")
                     return []
-
-                for element in book_elements:
-                    try:
-                        # 提取书籍信息，添加错误处理
-                        title = element.xpath('.//div[@slot="title"]/text()')
-                        author = element.xpath('.//div[@slot="author"]/text()')
-
-                        if not title or not author:
-                            self.logger.warning(f"跳过一本书籍：标题或作者信息不完整")
-                            continue
-
-                        download_path = element.get('download', '')
-                        download_url = f"https://1lib.sk{download_path}" if download_path else ""
-
-                        book = {
-                            'title': title[0].strip(),
-                            'author': author[0].strip(),
-                            'book_id': element.get('id', ''),
-                            'language': element.get('language', ''),
-                            'year': element.get('year', ''),
-                            'format': element.get('extension', ''),
-                            'download_url': download_url
-                        }
-
-                        if book['title'] and book['book_id']:  # 确保至少有标题和ID
-                            books.append(book)
-                        else:
-                            self.logger.warning(f"跳过一本书籍：缺少必要信息")
-
-                    except Exception as e:
-                        self.logger.warning(f"解析单本书籍信息时出错: {e}")
-                        continue
 
                 if not books:
                     self.logger.warning("未能成功解析任何书籍信息")
@@ -276,14 +199,6 @@ class BooklistDownloader:
             self.logger.debug("错误详情:", exc_info=True)  # 添加详细的错误信息
             return []
 
-    def _get_text(self, element, xpath: str) -> str:
-        """安全地获取xpath匹配的文本内容"""
-        try:
-            result = element.xpath(xpath)
-            return result[0].strip() if result else ""
-        except Exception:
-            return ""
-
     def download_book(self, book: Dict[str, str]) -> bool:
         """下载单本书籍"""
         try:
@@ -293,17 +208,15 @@ class BooklistDownloader:
                 return True
 
             # 构造文件名
-            safe_filename = self._safe_filename(f"{book['title']}")
+            safe_book_title = safe_filename(book['title'])
             file_extension = book['format'].lower()
 
             # 仅在启用本地索引时进行本地文件搜索
             if self.use_local_index and self.local_files_index:
-                # self.logger.info(f"正在从本地文件库搜索匹配文件《{safe_filename}》……")
-                local_key = (book['title'], f".{file_extension}") if (book['title'], f".{file_extension}") in self.local_files_index else (safe_filename, f".{file_extension}")
-                if local_key in self.local_files_index:
-                    # self.logger.info(f"已经在本地文件库中找到匹配文件《{safe_filename}》")
-                    source_path = self.local_files_index[local_key]
-                    target_path = self.save_dir / f"{local_key[0]}.{local_key[1]}"
+                source_path = find_local_library_match(book, self.local_files_index)
+                if source_path:
+                    target_stem = book['title'] if (book['title'], f".{file_extension}") in self.local_files_index else safe_book_title
+                    target_path = build_target_file_path(self.save_dir, target_stem, file_extension)
 
                     if not target_path.exists():
                         target_path.parent.mkdir(parents=True, exist_ok=True)
@@ -318,7 +231,7 @@ class BooklistDownloader:
                 self.logger.info("已禁用本地文件库搜索，直接进行网络下载...")
 
             # 如果本地没有找到，继续原有的下载逻辑
-            self.logger.info(f"本地文件库中未找到匹配文件《{safe_filename}》，继续从网络下载……")
+            self.logger.info(f"本地文件库中未找到匹配文件《{safe_book_title}》，继续从网络下载……")
 
             # 检查必要的字段
             if not book.get('book_id') or not book.get('title'):
@@ -326,7 +239,7 @@ class BooklistDownloader:
                 return False
 
             # 构造文件名
-            file_path = self.save_dir / f"{safe_filename}.{file_extension}"
+            file_path = build_target_file_path(self.save_dir, safe_book_title, file_extension)
 
             # 检查文件是否已存在
             if file_path.exists():
@@ -378,7 +291,7 @@ class BooklistDownloader:
                 return False
 
             # 保存文件
-            file_path = self.save_dir / f"{safe_filename}.{book_detail['extension']}"
+            file_path = build_target_file_path(self.save_dir, safe_book_title, book_detail['extension'])
             with file_path.open('wb') as f:
                 f.write(content)
 
@@ -399,14 +312,7 @@ class BooklistDownloader:
 
     def _safe_filename(self, filename: str) -> str:
         """生成安全的文件名"""
-        # 替换不安全的字符
-        unsafe_chars = '<>:"/\\|?*'
-        for char in unsafe_chars:
-            filename = filename.replace(char, '_')
-        # 限制文件名长度
-        if len(filename.encode('utf-8')) > 240:  # 留出一些空间给路径
-            filename = filename[:200] + '...' + filename[-10:]
-        return filename
+        return safe_filename(filename)
 
     def run(self):
         """运行下载流程"""

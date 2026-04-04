@@ -1,14 +1,17 @@
 """
 读取指定目录下的所有doc/docx文件内容，并拼接成一个markdown文件
 """
+import argparse
 from pathlib import Path
-import docx2txt
-import win32com.client
-import time
 import re
+
+
+DEFAULT_INPUT_DIRECTORY = Path(r"G:\Download\创作")
 
 def convert_doc_to_docx(doc_path):
     """将 doc 文件转换为 docx 文件"""
+    import win32com.client
+
     word = win32com.client.Dispatch('Word.Application')
     doc = word.Documents.Open(str(doc_path))
     docx_path = doc_path.with_suffix('.docx')
@@ -34,8 +37,12 @@ def doc_to_markdown(input_dir, output_file):
         input_dir: 输入目录路径
         output_file: 输出的 markdown 文件路径
     """
+    import docx2txt
+
     input_path = Path(input_dir)
     output_path = Path(output_file)
+    if not input_path.exists():
+        raise FileNotFoundError(f"输入目录不存在: {input_path}")
 
     # 收集并排序所有文档
     doc_files = sorted(input_path.glob('*.doc'), key=natural_sort_key)
@@ -61,8 +68,23 @@ def doc_to_markdown(input_dir, output_file):
     output_path.write_text('\n'.join(content), encoding='utf-8')
     print(f"转换完成，输出文件：{output_path}")
 
+
+def resolve_output_markdown(input_dir: Path, output_file: Path | None) -> Path:
+    return output_file or (Path(input_dir) / "output.md")
+
+
+def build_parser():
+    parser = argparse.ArgumentParser(description="将目录中的 doc/docx 合并为 Markdown")
+    parser.add_argument("--input-dir", type=Path, default=DEFAULT_INPUT_DIRECTORY, help="输入目录")
+    parser.add_argument("--output-file", type=Path, default=None, help="输出 Markdown 文件")
+    return parser
+
+
+def main(argv=None):
+    args = build_parser().parse_args(argv)
+    output_file = resolve_output_markdown(args.input_dir, args.output_file)
+    doc_to_markdown(args.input_dir, output_file)
+
+
 if __name__ == '__main__':
-    # 使用示例
-    input_directory = Path(r"G:\Download\创作")  # 输入目录
-    output_markdown = input_directory / "output.md"  # 输出文件
-    doc_to_markdown(input_directory, output_markdown)
+    main()
