@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from lxml import html
+from library_index import normalize_text
 
 
 def safe_filename(filename: str) -> str:
@@ -60,7 +61,21 @@ def find_local_library_match(book: dict[str, str], local_files_index: dict[tuple
         return local_files_index[exact_key]
 
     fallback_key = (safe_filename(book["title"]), normalized_extension)
-    return local_files_index.get(fallback_key)
+    if fallback_key in local_files_index:
+        return local_files_index[fallback_key]
+
+    title_norm = normalize_text(book["title"])
+    normalized_records = local_files_index.get("__records__", [])
+    candidates = [
+        record
+        for record in normalized_records
+        if record["ext"] == normalized_extension and record["stem_norm"].startswith(title_norm)
+    ]
+    if not candidates:
+        return None
+
+    best_match = max(candidates, key=lambda record: (record["size"], record["mtime"]))
+    return best_match["path"]
 
 
 def _get_text(element, xpath: str) -> str:

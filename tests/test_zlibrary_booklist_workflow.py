@@ -2,7 +2,8 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from download_from_zlibrary_booklist import BooklistDownloader
+import collect_local_ebooks
+from download_from_zlibrary_booklist import BooklistDownloader, build_local_files_index
 from zlibrary_booklist_workflow import (
     build_target_file_path,
     find_local_library_match,
@@ -113,6 +114,38 @@ class ZlibraryBooklistWorkflowTests(unittest.TestCase):
             result = downloader.download_book({"title": "局外人", "format": "pdf", "book_id": "1"})
 
         self.assertTrue(result)
+
+    def test_build_local_files_index_reads_sqlite_index(self):
+        with TemporaryDirectory() as temp_dir:
+            library_dir = Path(temp_dir)
+            epub_file = library_dir / "局外人.epub"
+            pdf_file = library_dir / "局外人.pdf"
+            epub_file.write_bytes(b"epub content")
+            pdf_file.write_bytes(b"pdf content")
+
+            collect_local_ebooks.generate_file_list(library_dir)
+
+            local_files_index = build_local_files_index(library_dir)
+
+            self.assertEqual(local_files_index[("局外人", ".epub")].resolve(), epub_file.resolve())
+            self.assertEqual(local_files_index[("局外人", ".pdf")].resolve(), pdf_file.resolve())
+            self.assertFalse((library_dir / "_file_list.txt").exists())
+
+    def test_build_local_files_index_and_match_use_normalized_book_key(self):
+        with TemporaryDirectory() as temp_dir:
+            library_dir = Path(temp_dir)
+            epub_file = library_dir / "Clean-Code（第二版）.epub"
+            epub_file.write_bytes(b"epub content")
+
+            collect_local_ebooks.generate_file_list(library_dir)
+            local_files_index = build_local_files_index(library_dir)
+
+            matched = find_local_library_match(
+                {"title": "Clean Code", "format": "epub"},
+                local_files_index,
+            )
+
+            self.assertEqual(matched.resolve(), epub_file.resolve())
 
 
 if __name__ == "__main__":

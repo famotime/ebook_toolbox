@@ -1,35 +1,5 @@
 """
 在本地硬盘上查找书单中的电子书，并复制到一个统一的目录中。
-
-功能说明：
-1. 支持两种输入方式：
-   - 从剪贴板读取（监控模式）
-   - 从文件读取（批量处理模式）
-2. 清单格式要求：
-   - 必须包含使用《》包裹的书名
-   - 使用剪贴板时，第一行作为子目录名
-3. 书名会清理HTML标签和特殊字符
-4. 搜索规则：
-   - 文件名必须以搜索词开头（忽略标点符号和大小写）
-   - 支持中文、英文和数字
-   - 文件类型优先级：epub > pdf > txt > mobi > azw3
-   - 同类型文件优先选择更大的文件，大小相同则选择更新的文件
-5. 输出目录结构：
-   - 统一输出到指定的父目录（BOOKS_OUTPUT_DIR）
-   - 单本书籍自动归类到"单本好书"子目录
-   - 多本书籍创建独立的子目录
-   - 每个目录包含处理结果和日志文件
-6. 处理流程：
-   - 首次运行时生成搜索目录下的文件列表索引（_file_list.txt），以加快搜索速度
-   - 生成两个结果文件：
-     * 处理结果.txt：简要统计和文件列表
-     * 处理日志.txt：详细的处理记录和完整路径
-   - 批量处理时记录进度，支持断点续处理
-
-注意事项：
-- 监控模式下，粘贴不包含《》的内容可退出程序
-- 支持的书单文件格式：txt、md、html
-- 批量处理时出错会记录到：处理错误.txt
 """
 
 from pathlib import Path
@@ -37,6 +7,15 @@ import shutil
 import re
 import time
 import pyperclip
+from library_index import (
+    SUPPORTED_EBOOK_EXTENSIONS,
+    files_share_content,
+    generate_file_index,
+    get_index_db_path,
+    load_index_records,
+    normalize_text,
+    query_best_prefix_match,
+)
 from local_ebooks_workflow import (
     SINGLE_BOOK_DIRNAME,
     classify_list_file,
@@ -48,101 +27,40 @@ from local_ebooks_workflow import (
 
 BOOKS_OUTPUT_DIR = None
 
+def load_indexed_files(search_dir) -> list[tuple[Path, int, float]]:
+    return [
+        (record.path, record.size, record.mtime)
+        for record in load_index_records(search_dir, SUPPORTED_EBOOK_EXTENSIONS)
+    ]
+
 
 def generate_file_list(search_dir, folders_to_update=None):
     """
-    生成目录下所有文件的路径列表文件
+    生成目录下所有文件的 SQLite 索引
     Args:
         search_dir: 搜索目录路径
         folders_to_update: 需要更新的文件夹列表，如果为None则更新所有目录
     Returns:
-        文件列表文件的路径
+        索引数据库文件路径
     """
     search_path = Path(search_dir)
-    file_list_path = search_path / '_file_list.txt'
+    index_db_path = get_index_db_path(search_path)
 
-    print(f"正在生成文件列表：{file_list_path}")
+    print(f"正在生成文件索引：{index_db_path}")
     if folders_to_update:
         print(f"仅更新以下目录: {', '.join(folders_to_update)}")
 
-    # 如果文件列表已存在且指定了部分更新，先读取现有内容
-    existing_files = {}
-    if file_list_path.exists() and folders_to_update:
-        with file_list_path.open('r', encoding='utf-8') as f:
-            for line in f:
-                try:
-                    path_str, size, mtime = line.strip().split('|')
-                    path = Path(path_str)
-                    # 如果文件不在需要更新的目录中，保留原记录
-                    if not any(folder.lower() in str(path).lower() for folder in folders_to_update):
-                        existing_files[str(path)] = f"{path}|{size}|{mtime}"
-                except:
-                    continue
-
-    # 收集所有支持的电子书文件
-    files = []
-    for ext in ['.epub', '.pdf', '.txt', '.mobi', '.azw3']:
-        try:
-            if folders_to_update:
-                # 只搜索指定目录
-                for folder in folders_to_update:
-                    folder_path = search_path / folder
-                    if folder_path.exists():
-                        for p in folder_path.rglob(f'*{ext}'):
-                            try:
-                                if _is_valid_file(p):
-                                    stat = p.stat()
-                                    files.append(f"{p}|{stat.st_size}|{stat.st_mtime}")
-                            except (PermissionError, OSError):
-                                continue
-            else:
-                # 搜索所有目录
-                for p in search_path.rglob(f'*{ext}'):
-                    try:
-                        if _is_valid_file(p):
-                            stat = p.stat()
-                            files.append(f"{p}|{stat.st_size}|{stat.st_mtime}")
-                    except (PermissionError, OSError):
-                        continue
-        except Exception as e:
-            print(f"搜索{ext}文件时出错: {e}")
-            continue
-
-    # 合并现有文件记录和新扫描的文件
-    all_files = list(existing_files.values()) + files
-
-    # 将文件列表写入文件
-    with file_list_path.open('w', encoding='utf-8') as f:
-        f.write('\n'.join(all_files))
-
-    print(f"文件列表生成完成，共 {len(all_files)} 个文件")
-    return file_list_path
-
-def _is_valid_file(path):
-    """
-    检查文件是否有效（不在系统目录中）
-    """
-    SKIP_DIRS = {
-        'System Volume Information',
-        '$Recycle.Bin',
-        '$RECYCLE.BIN',
-        'Config.Msi',
-        'Recovery',
-        'Documents and Settings',
-        'PerfLogs',
-        'Program Files',
-        'Program Files (x86)',
-        'Windows'
-    }
-    return path.is_file() and not any(x.startswith('$') or x in SKIP_DIRS for x in path.parts)
+    generate_file_index(search_path, folders_to_update, SUPPORTED_EBOOK_EXTENSIONS)
+    total_files = len(load_indexed_files(search_path))
+    print(f"文件索引生成完成，共 {total_files} 个文件")
+    return index_db_path
 
 def clean_filename(filename):
     """
     清理文件名中的标点符号和空格，只保留中文、英文和数字
     """
-    # 使用正则表达式保留中文字符、英文字母和数字
-    cleaned = re.sub(r'[^\u4e00-\u9fff\w]', '', filename)
-    return cleaned.lower()  # 转换为小写
+    return normalize_text(filename)
+
 
 def search_file(filename, search_dir, folders_to_update=None):
     """
@@ -153,52 +71,26 @@ def search_file(filename, search_dir, folders_to_update=None):
         folders_to_update: 需要更新的文件夹列表
     """
     search_path = Path(search_dir)
-    file_list_path = search_path / '_file_list.txt'
+    index_db_path = get_index_db_path(search_path)
     name = clean_filename(filename)
     if not name:
         name = filename.lower()
 
     print(f"正在搜索：{filename}（清理后的搜索词：{name}）")
 
-    # 仅在首次搜索时生成或更新文件列表
-    if not hasattr(search_file, '_file_cache'):
-        # 如果文件列表不存在 或为空 或需要部分更新文件夹索引，则生成
-        if not file_list_path.exists() or file_list_path.stat().st_size == 0 or folders_to_update:
-            print(f"正在生成文件索引列表：{file_list_path}，耗时较长，请等待……")
-            file_list_path = generate_file_list(search_dir, folders_to_update)
+    if folders_to_update or not index_db_path.exists() or index_db_path.stat().st_size == 0:
+        print(f"正在生成文件索引列表：{index_db_path}，耗时较长，请等待……")
+        generate_file_list(search_dir, folders_to_update)
 
-        # 初始化文件缓存
-        print(f"正在读取文件索引列表：{file_list_path}，耗时较长，请等待……")
-        search_file._file_cache = {
-            '.epub': [], '.pdf': [], '.txt': [],
-            '.mobi': [], '.azw3': []  # 添加 .mobi 和 .azw3
-        }
-        with file_list_path.open('r', encoding='utf-8') as f:
-            for line in f:
-                path_str, size, mtime = line.strip().split('|')
-                path = Path(path_str)
-                ext = path.suffix.lower()
-                if ext in search_file._file_cache:
-                    search_file._file_cache[ext].append((
-                        str(path),
-                        clean_filename(path.stem),
-                        int(size),
-                        float(mtime)
-                    ))
+    match = query_best_prefix_match(search_path, name, SUPPORTED_EBOOK_EXTENSIONS)
+    if match and not Path(match).exists():
+        print(f"索引中的文件已失效，正在重建索引：{index_db_path}")
+        generate_file_list(search_dir)
+        match = query_best_prefix_match(search_path, name, SUPPORTED_EBOOK_EXTENSIONS)
 
-    # 按优先级搜索匹配的文件
-    matches = []
-    for ext in ['.epub', '.pdf', '.txt', '.mobi', '.azw3']:  # 按指定顺序搜索
-        for file_path, clean_stem, size, mtime in search_file._file_cache[ext]:
-            if clean_stem.startswith(name):
-                matches.append((file_path, ext, size, mtime))
-
-        # 如果在当前优先级找到匹配，就不继续搜索次优先级的文件
-        if matches:
-            # 在相同后缀名下优先选择更大的文件，如果大小相同则选择更新的文件
-            match = max(matches, key=lambda x: (x[2], x[3]))[0]
-            print(f"已找到：{match}\n")
-            return match
+    if match:
+        print(f"已找到：{match}\n")
+        return str(match)
 
     print(f"未找到：{filename}\n")
     return "未找到"
@@ -212,12 +104,11 @@ def check_file_list_update(search_dir):
         bool: 是否需要更新
     """
     search_path = Path(search_dir)
-    # 文件名示例: _file_list_20241201.txt
-    file_list_path = search_path / f'_file_list.txt'
+    index_db_path = get_index_db_path(search_path)
 
-    # 如果文件列表不存在或为空，需要生成
-    if not file_list_path.exists() or file_list_path.stat().st_size == 0:
-        print(f"文件列表{file_list_path}不存在或为空，需要生成。")
+    # 如果数据库索引不存在，需要生成
+    if not index_db_path.exists() or index_db_path.stat().st_size == 0:
+        print(f"文件索引{index_db_path}不存在或为空，需要生成。")
         return True
 
     # 如果文件列表超过24小时未更新，建议更新
@@ -227,6 +118,14 @@ def check_file_list_update(search_dir):
     #     return user_input.lower() == 'y'
 
     return False
+
+
+def _find_same_content_file(source_path: Path, output_dir: Path) -> Path | None:
+    source_path = Path(source_path)
+    for existing_file in output_dir.glob("*.*"):
+        if existing_file.is_file() and files_share_content(source_path, existing_file):
+            return existing_file
+    return None
 
 def extract_book_names(content: str) -> list[str]:
     """
@@ -434,6 +333,14 @@ def process_book_list(list_file, search_dir, from_clipboard=False, output_dir=No
         else:
             stats['found'] += 1
             try:
+                duplicate_file = _find_same_content_file(Path(file_path), output_dir)
+                if duplicate_file is not None:
+                    stats['existing'] += 1
+                    result = f"《{book_name}》: 跳过（输出目录已有相同内容文件：{duplicate_file.name}）"
+                    results.append(result)
+                    log_results.append(result)
+                    continue
+
                 shutil.copy2(file_path, output_dir)
                 stats['copied'] += 1
                 # 结果文件只记录文件名

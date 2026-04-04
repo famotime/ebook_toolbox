@@ -1,6 +1,7 @@
 import hashlib
 import unittest
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 from duplicate_finder_workflow import (
     FileInfoRecord,
@@ -9,6 +10,7 @@ from duplicate_finder_workflow import (
     parse_checked_paths_from_report,
     select_preferred_file,
 )
+from find_duplicated_files import DuplicateFinder
 
 
 class DuplicateFinderWorkflowTests(unittest.TestCase):
@@ -63,6 +65,25 @@ class DuplicateFinderWorkflowTests(unittest.TestCase):
         checked_paths = parse_checked_paths_from_report(report)
 
         self.assertEqual(checked_paths, ["H:/dup/a.jpg", "H:/dup2/a.jpg"])
+
+    def test_duplicate_finder_detects_same_content_even_when_filenames_differ(self):
+        with TemporaryDirectory() as temp_dir:
+            root_dir = Path(temp_dir)
+            kept_file = root_dir / "归档" / "a.txt"
+            duplicate_file = root_dir / "待整理" / "b.txt"
+            kept_file.parent.mkdir()
+            duplicate_file.parent.mkdir()
+            kept_file.write_bytes(b"same-content")
+            duplicate_file.write_bytes(b"same-content")
+
+            finder = DuplicateFinder(root_dir, rebuild_index=True)
+            duplicates = finder.find_duplicates(
+                compare_content=True,
+                include_path="归档",
+                recursive=True,
+            )
+
+            self.assertEqual(duplicates, {str(kept_file.resolve()): [duplicate_file.resolve()]})
 
 
 if __name__ == "__main__":

@@ -16,6 +16,7 @@ import pyperclip
 from urllib.parse import urlparse, urljoin
 import logging
 from datetime import datetime
+from library_index import generate_file_index, load_index_records
 from zlibrary_booklist_workflow import (
     build_target_file_path,
     find_local_library_match,
@@ -215,7 +216,7 @@ class BooklistDownloader:
             if self.use_local_index and self.local_files_index:
                 source_path = find_local_library_match(book, self.local_files_index)
                 if source_path:
-                    target_stem = book['title'] if (book['title'], f".{file_extension}") in self.local_files_index else safe_book_title
+                    target_stem = book['title'] if source_path.stem == book['title'] else safe_book_title
                     target_path = build_target_file_path(self.save_dir, target_stem, file_extension)
 
                     if not target_path.exists():
@@ -457,64 +458,35 @@ def build_local_files_index(local_library_path: Path) -> Dict:
     """建立本地文件索引"""
     logger = logging.getLogger('zlibrary_downloader')
     local_files_index = {}
-    file_list_path = local_library_path / '_file_list.txt'
+    indexed_files = load_index_records(local_library_path)
+    if not indexed_files:
+        logger.info(f"本地索引缺失，正在重建: {local_library_path}")
+        generate_file_index(local_library_path)
+        indexed_files = load_index_records(local_library_path)
 
-    # 如果索引文件存在且不为空，直接读取
-    if file_list_path.exists() and file_list_path.stat().st_size > 0:
-        logger.info(f"正在从索引文件读取本地文件库: {file_list_path}，请耐心等待……")
-        with file_list_path.open('r', encoding='utf-8') as f:
-            for line in f:
-                try:
-                    path_str, size, mtime = line.strip().split('|')
-                    path = Path(path_str)
-                    # if path.exists():  # 确认文件仍然存在
-                    key = (path.stem, path.suffix.lower())
-                    local_files_index[key] = path
-                except:
-                    continue
-        logger.info(f"已读取本地文件索引，共计 {len(local_files_index)} 个电子书文件")
-        return local_files_index
+    logger.info(f"正在从 SQLite 索引读取本地文件库: {local_library_path / '_file_index.sqlite3'}，请耐心等待……")
+    normalized_records = []
+    for record in indexed_files:
+        key = (record.stem, record.ext)
+        local_files_index[key] = record.path
+        normalized_records.append(
+            {
+                "path": record.path,
+                "stem_norm": record.stem_norm,
+                "ext": record.ext,
+                "size": record.size,
+                "mtime": record.mtime,
+            }
+        )
+    local_files_index["__records__"] = normalized_records
 
-    # 如果索引文件不存在或为空，则重新生成
-    logger.info(f"正在索引本地文件库: {local_library_path}，请耐心等待……")
-    files = []
-    # 需要排除的系统文件夹
-    exclude_dirs = {'$RECYCLE.BIN', 'System Volume Information', 'Recovery'}
-    for ext in ['.epub', '.pdf', '.txt', '.mobi', '.azw3']:  # 支持的文件类型
-        try:
-            for p in local_library_path.rglob(f'*{ext}'):
-                try:
-                    # 检查路径中是否包含需要排除的系统文件夹
-                    if any(x in p.parts for x in exclude_dirs):
-                        continue
-                    if p.is_file():
-                        stat = p.stat()
-                        # 跳过小于10KB的文件
-                        if stat.st_size < 10 * 1024:  # 10KB = 10 * 1024 bytes
-                            continue
-                        files.append(f"{p}|{stat.st_size}|{stat.st_mtime}")
-                        key = (p.stem, p.suffix.lower())
-                        local_files_index[key] = p
-                except (PermissionError, OSError):
-                    continue
-        except Exception as e:
-            logger.error(f"搜索{ext}文件时出错: {e}")
-            continue
-
-    # 保存索引文件
-    try:
-        with file_list_path.open('w', encoding='utf-8') as f:
-            f.write('\n'.join(files))
-        logger.info("完成本地文件索引，共计找到", len(files), "个电子书文件")
-        logger.info(f"索引文件已保存到: {file_list_path}")
-    except Exception as e:
-        logger.error(f"保存索引文件失败: {e}")
+    logger.info(f"已读取本地文件索引，共计 {len(normalized_records)} 个电子书文件")
 
     return local_files_index
 
 if __name__ == "__main__":
-    save_dir = Path(r"J:\zlibrary_booklists")
-    local_library_path = Path(r"J:")  # 设置本地文件库路径
+    save_dir = Path(r"I:\zlibrary_booklists")
+    local_library_path = Path(r"I:")  # 设置本地文件库路径
     BASE_URL = "https://1lib.sk"
     USE_LOCAL_INDEX = True  # 控制是否使用本地索引
 
