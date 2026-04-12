@@ -144,7 +144,7 @@ class ZLibraryDownloader:
             if downloads_left <= 0:
                 print("今日下载次数已用完")
                 self.stats.failed_books += 1  # 下载次数用完计入失败
-                return None
+                raise Exception("QUOTA_EXCEEDED")
 
             # 下载图书
             filename, content = self.client.downloadBook(found_book)
@@ -163,6 +163,8 @@ class ZLibraryDownloader:
             return file_path
 
         except Exception as e:
+            if str(e) == "QUOTA_EXCEEDED":
+                raise
             print(f"处理图书时出错: {e}")
             self.stats.failed_books += 1  # 异常情况计入失败
             self.update_result_file(book_name, success=False)
@@ -264,10 +266,13 @@ def main(root_dir: Path | str, progress_file: Path = None):
                 stats.total_books += len(missing_books)
                 downloader.run()
                 stats.processed_files += 1
-                final_downloads_left = downloader.downloads_left
+                final_downloads_left = downloader.client.getDownloadsLeft()
                 stats.processed_file_list.append(str(result_file))
             except Exception as e:
                 print(f"处理 {result_file} 时出错: {e}")
+                if "QUOTA_EXCEEDED" in str(e):
+                    print("检测到下载限额已满，主动终止当前及后续队列，保存断点供明天续传。")
+                    break
                 continue
             finally:
                 stats.save_progress(progress_file)
