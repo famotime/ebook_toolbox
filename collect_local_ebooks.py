@@ -95,7 +95,7 @@ def search_file(filename, search_dir, folders_to_update=None):
     print(f"未找到：{filename}\n")
     return "未找到"
 
-def check_file_list_update(search_dir):
+def check_file_list_update(search_dir, force_threshold_hours=24):
     """
     检查文件列表是否需要更新
     Args:
@@ -111,11 +111,11 @@ def check_file_list_update(search_dir):
         print(f"文件索引{index_db_path}不存在或为空，需要生成。")
         return True
 
-    # 如果文件列表超过24小时未更新，建议更新
-    # file_age = time.time() - file_list_path.stat().st_mtime
-    # if file_age > 24 * 3600:  # 24小时
-    #     user_input = input("文件列表已超过24小时未更新，是否重新生成？(y/n): ")
-    #     return user_input.lower() == 'y'
+    # 如果文件列表超过指定时间未更新，进行增量同步
+    file_age = time.time() - index_db_path.stat().st_mtime
+    if file_age > force_threshold_hours * 3600:
+        print(f"文件索引已大概 {file_age / 3600:.1f} 小时未更新，准备进行增量同步...")
+        return True
 
     return False
 

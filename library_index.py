@@ -3,6 +3,7 @@ from __future__ import annotations
 from contextlib import closing
 from dataclasses import dataclass
 import hashlib
+import os
 from pathlib import Path
 import re
 import sqlite3
@@ -110,50 +111,6 @@ def ensure_index_schema(conn: sqlite3.Connection):
     )
 
 
-def collect_index_rows(
-    root_dir: Path | str,
-    folders_to_update: list[str] | None = None,
-    allowed_extensions: tuple[str, ...] | None = SUPPORTED_EBOOK_EXTENSIONS,
-    recursive: bool = True,
-) -> list[tuple[str, str, str, str, str, int, str, int, float]]:
-    root_path = Path(root_dir)
-    candidate_roots = [root_path]
-    if folders_to_update:
-        candidate_roots = [root_path / folder for folder in folders_to_update]
-
-    rows = []
-    for candidate_root in candidate_roots:
-        if not candidate_root.exists():
-            continue
-        iterator = candidate_root.rglob("*") if recursive else candidate_root.glob("*")
-        try:
-            for path in iterator:
-                try:
-                    if not is_valid_index_target(path, allowed_extensions):
-                        continue
-                    resolved_path = path.resolve()
-                    stat = resolved_path.stat()
-                    extension = resolved_path.suffix.lower()
-                    rows.append(
-                        (
-                            str(resolved_path),
-                            resolved_path.name,
-                            resolved_path.stem,
-                            normalize_text(resolved_path.stem),
-                            extension,
-                            EXTENSION_PRIORITY.get(extension, len(EXTENSION_PRIORITY)),
-                            build_book_key(resolved_path.stem, extension),
-                            stat.st_size,
-                            stat.st_mtime,
-                        )
-                    )
-                except (PermissionError, OSError):
-                    continue
-        except Exception:
-            continue
-    return rows
-
-
 def generate_file_index(
     root_dir: Path | str,
     folders_to_update: list[str] | None = None,
@@ -162,27 +119,113 @@ def generate_file_index(
 ) -> Path:
     root_path = Path(root_dir)
     index_db_path = get_index_db_path(root_path)
-    rows = collect_index_rows(root_path, folders_to_update, allowed_extensions, recursive)
 
     with closing(sqlite3.connect(index_db_path)) as conn:
         ensure_index_schema(conn)
+
+        # 1. 提取数据库中已有的状态
+        existing_files = {}
         if folders_to_update:
             for folder in folders_to_update:
                 folder_prefix = str((root_path / folder).resolve())
-                conn.execute(
-                    "DELETE FROM files WHERE path = ? OR path LIKE ?",
+                # 注意这里可能无法匹配根目录，通常用 LIKE
+                cursor = conn.execute(
+                    "SELECT path, mtime, size FROM files WHERE path = ? OR path LIKE ?",
                     (folder_prefix, folder_prefix + "\\%"),
                 )
+                for row in cursor:
+                    existing_files[row[0]] = (row[1], row[2])
         else:
-            conn.execute("DELETE FROM files")
+            cursor = conn.execute("SELECT path, mtime, size FROM files")
+            for row in cursor:
+                existing_files[row[0]] = (row[1], row[2])
 
-        conn.executemany(
-            """
-            INSERT INTO files(path, name, stem, stem_norm, ext, ext_priority, book_key, size, mtime)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            rows,
-        )
+        # 2. 扫描磁盘
+        candidate_roots = [root_path]
+        if folders_to_update:
+            candidate_roots = [root_path / folder for folder in folders_to_update]
+
+        scanned_paths = set()
+        to_insert = []
+        to_update = []
+        
+        # 针对大小写不敏感的文件后缀匹配
+        allowed_exts_lower = tuple(ext.lower() for ext in allowed_extensions) if allowed_extensions else None
+
+        def fast_walk(current_dir: str):
+            try:
+                with os.scandir(current_dir) as it:
+                    for entry in it:
+                        try:
+                            if entry.is_dir(follow_symlinks=False):
+                                if entry.name not in SKIP_DIRS and not entry.name.startswith("$") and recursive:
+                                    fast_walk(entry.path)
+                            elif entry.is_file(follow_symlinks=False):
+                                name_lower = entry.name.lower()
+                                if allowed_exts_lower and not name_lower.endswith(allowed_exts_lower):
+                                    continue
+                                if entry.name == INDEX_DB_FILENAME:
+                                    continue
+
+                                path_str = entry.path
+                                scanned_paths.add(path_str)
+
+                                stat = entry.stat()
+                                mtime = stat.st_mtime
+                                size = stat.st_size
+
+                                if path_str in existing_files:
+                                    old_mtime, old_size = existing_files[path_str]
+                                    if old_mtime != mtime or old_size != size:
+                                        # 文件已修改
+                                        p = Path(path_str)
+                                        extension = p.suffix.lower()
+                                        to_update.append((
+                                            p.name, p.stem, normalize_text(p.stem), extension,
+                                            EXTENSION_PRIORITY.get(extension, len(EXTENSION_PRIORITY)),
+                                            build_book_key(p.stem, extension), size, mtime, path_str
+                                        ))
+                                else:
+                                    # 新增文件
+                                    p = Path(path_str)
+                                    extension = p.suffix.lower()
+                                    to_insert.append((
+                                        path_str, p.name, p.stem, normalize_text(p.stem), extension,
+                                        EXTENSION_PRIORITY.get(extension, len(EXTENSION_PRIORITY)),
+                                        build_book_key(p.stem, extension), size, mtime
+                                    ))
+                        except (PermissionError, OSError):
+                            continue
+            except (PermissionError, OSError):
+                pass
+
+        for root in candidate_roots:
+            if root.exists():
+                fast_walk(str(root.resolve()))
+
+        # 3. 找出需要删除的文件（数据库里有，但没扫描到）
+        to_delete = [(p,) for p in existing_files if p not in scanned_paths]
+
+        # 4. 执行更新
+        if to_delete:
+            conn.executemany("DELETE FROM files WHERE path = ?", to_delete)
+        if to_insert:
+            conn.executemany(
+                """
+                INSERT INTO files(path, name, stem, stem_norm, ext, ext_priority, book_key, size, mtime)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                to_insert,
+            )
+        if to_update:
+            conn.executemany(
+                """
+                UPDATE files SET name=?, stem=?, stem_norm=?, ext=?, ext_priority=?, book_key=?, size=?, mtime=?, quick_hash=NULL, full_hash=NULL
+                WHERE path=?
+                """,
+                to_update
+            )
+            
         conn.commit()
 
     return index_db_path
