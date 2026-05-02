@@ -200,8 +200,8 @@ class LocalEbooksWorkflowTests(unittest.TestCase):
             epub_files = list(target_dir.glob("*.epub"))
             self.assertEqual(len(epub_files), 1)
             self.assertEqual(epub_files[0].resolve(), existing_duplicate.resolve())
-            log_content = (target_dir / "处理日志.txt").read_text(encoding="utf-8")
-            self.assertIn("相同内容", log_content)
+            result_content = (target_dir / "处理结果.txt").read_text(encoding="utf-8")
+            self.assertIn("相同内容", result_content)
 
 
 if __name__ == "__main__":
