@@ -231,7 +231,7 @@ def _resolve_books_output_dir(output_dir=None) -> Path:
     return Path(resolved_output_dir)
 
 
-def process_book_list(list_file, search_dir, from_clipboard=False, output_dir=None):
+def process_book_list(list_file, search_dir, from_clipboard=False, output_dir=None, clipboard_content=None):
     """
     处理书籍清单
     Args:
@@ -239,6 +239,7 @@ def process_book_list(list_file, search_dir, from_clipboard=False, output_dir=No
         search_dir: 搜索目录路径
         from_clipboard: 是否从剪贴板读取内容
         output_dir: 输出目录
+        clipboard_content: 剪贴板文本内容（从Web传入时使用），非空时优先使用此内容
     """
     search_path = Path(search_dir)
     base_output_dir = _resolve_books_output_dir(output_dir)
@@ -251,7 +252,12 @@ def process_book_list(list_file, search_dir, from_clipboard=False, output_dir=No
         if not parent_dir.exists():
             parent_dir.mkdir(parents=True, exist_ok=True)
 
-        dir_name, book_names = get_books_from_clipboard()
+        if clipboard_content:
+            lines = clipboard_content.splitlines()
+            dir_name = clean_dirname(lines[0].strip()) if lines else "新建书单"
+            book_names = extract_book_names(clipboard_content)
+        else:
+            dir_name, book_names = get_books_from_clipboard()
         if not dir_name or not book_names:
             return
 
@@ -282,9 +288,8 @@ def process_book_list(list_file, search_dir, from_clipboard=False, output_dir=No
     # 创建输出目录
     output_dir.mkdir(exist_ok=True)
 
-    # 结果文件和日志文件都保存在新建的书单目录下
+    # 结果文件保存在新建的书单目录下
     result_file = output_dir / "处理结果.txt"
-    log_file = output_dir / "处理日志.txt"
 
     # 读取已有的处理结果
     previously_copied = set()
@@ -305,52 +310,38 @@ def process_book_list(list_file, search_dir, from_clipboard=False, output_dir=No
         'copy_failed': []    # 复制失败的文件列表
     }
 
-    # 处理每本书
     results = []
-    log_results = []  # 新增：用于记录详细日志
     for book_name in book_names:
-        # 如果书已经在之前的处理结果中，跳过处理
+        # 如果书已经在之前的处理结果中，跳过处理且不再重复追加到results，因为 existing_copied_files 会将其原样写回
         if book_name in previously_copied:
             stats['existing'] += 1
-            result = f"《{book_name}》: 跳过（之前已处理）"
-            results.append(result)
-            log_results.append(result)
             continue
 
         clean_name = clean_filename(book_name)
 
         if clean_name in existing_files:
             stats['existing'] += 1
-            result = f"《{book_name}》: 跳过（输出目录已存在：{existing_files[clean_name]}）"
-            results.append(result)
-            log_results.append(result)  # 跳过的文件记录相同
+            results.append(f"- 《{book_name}》: 跳过（输出目录已存在：{existing_files[clean_name]}）")
             continue
 
         file_path = search_file(book_name, search_path)
         if file_path == "未找到":
             stats['not_found'].append(book_name)
-            log_results.append(f"《{book_name}》: 未找到")
         else:
             stats['found'] += 1
             try:
                 duplicate_file = _find_same_content_file(Path(file_path), output_dir)
                 if duplicate_file is not None:
                     stats['existing'] += 1
-                    result = f"《{book_name}》: 跳过（输出目录已有相同内容文件：{duplicate_file.name}）"
-                    results.append(result)
-                    log_results.append(result)
+                    results.append(f"- 《{book_name}》: 跳过（输出目录已有相同内容文件：{duplicate_file.name}）")
                     continue
 
                 shutil.copy2(file_path, output_dir)
                 stats['copied'] += 1
-                # 结果文件只记录文件名
-                results.append(f"- 《{book_name}》")
-                # 日志文件记录完整路径
-                log_results.append(f"《{book_name}》: 已复制 {file_path}")
+                results.append(f"- 《{book_name}》: 已复制 {file_path}")
             except Exception as e:
                 stats['copy_failed'].append((book_name, str(e)))
-                error_msg = f"《{book_name}》: 复制失败 - 源文件：{file_path}, 错误：{str(e)}"
-                log_results.append(error_msg)
+                results.append(f"- 《{book_name}》: 复制失败 - {str(e)}")
 
     # 读取已有的处理结果内容
     existing_content = ""
@@ -362,39 +353,33 @@ def process_book_list(list_file, search_dir, from_clipboard=False, output_dir=No
 
     # 将结果写入结果文件
     with result_file.open('w', encoding='utf-8') as f:
-        f.write("处理总结：\n")
-        f.write(f"总共需要处理的文件数：{stats['total']}\n")
-        f.write(f"已存在的文件数：{stats['existing']}\n")
-        f.write(f"新找到的文件数：{stats['found']}\n")
-        f.write(f"成功复制的文件数：{stats['copied']}\n")
-        f.write(f"未找到的文件数：{len(stats['not_found'])}\n\n")
+        f.write("========== 本地书籍处理结果 ==========\n")
+        f.write(f"处理时间：{time.strftime('%Y-%m-%d %H:%M:%S')}\n")
+        f.write(f"本地搜索目录：{search_dir}\n")
+        f.write(f"输出归档目录：{output_dir}\n\n")
+
+        f.write(f"总计需求文件数：{stats['total']}\n")
+        f.write(f"本次之前已存在：{stats['existing']}\n")
+        f.write(f"本次新找到复制：{stats['copied']}\n")
+        f.write(f"当前未找到文件：{len(stats['not_found'])}\n\n")
 
         f.write("已找到并复制的文件：\n")
         # 首先写入原有的已复制文件列表
         if existing_copied_files:
             f.write(existing_copied_files + "\n")
-        # 然后写入新复制的文件
+        # 然后写入新复制和跳过的文件详细记录
         for result in results:
-            if "未找到" not in result and "跳过" not in result:
-                f.write(f"{result}\n")
+            f.write(f"{result}\n")
         f.write("\n")
 
+        # 始终写入“未找到的文件清单：”（即使为空），以保证后续重试脚本和 Z-Lib 模块正则兼容
+        f.write("未找到的文件清单：\n")
         if stats['not_found']:
-            f.write("未找到的文件清单：\n")
             for book in stats['not_found']:
                 f.write(f"- 《{book}》\n")
-            f.write("\n")
+        f.write("\n")
 
-    # 将详细结果写入日志文件（包含完整路径）
-    with log_file.open('w', encoding='utf-8') as f:
-        f.write(f"处理时间：{time.strftime('%Y-%m-%d %H:%M:%S')}\n")
-        f.write(f"搜索目录：{search_dir}\n")
-        f.write(f"输出目录：{output_dir}\n")
-        f.write("="*50 + "\n\n")
-        f.write('\n'.join(log_results))
-
-    print(f"\n处理日志已保存到：{log_file}")
-    print(f"处理结果已保存到：{result_file}")
+    print(f"\n处理结果已保存到：{result_file}")
 
 def monitor_clipboard(search_dir, output_dir=None):
     """
@@ -554,6 +539,92 @@ def process_book_list_directory(list_dir, search_dir, output_dir=None):
     finally:
         # 打印最终处理统计，使用本次处理的计数
         print(f"\n处理完成！本次处理了 {current_processed}/{total_files} 个文件")
+
+
+def retry_missing_local_books(output_dir: str | Path, search_dir: str | Path):
+    """重试本地搜索遗漏书籍"""
+    output_dir = Path(output_dir)
+    search_dir = Path(search_dir)
+
+    result_files = list(output_dir.rglob("处理结果.txt"))
+    for result_file in result_files:
+        with result_file.open('r', encoding='utf-8') as f:
+            content = f.read()
+
+        is_missing_section = False
+        missing_books = []
+        for line in content.splitlines():
+            line_str = line.strip()
+            if line_str == "未找到的文件清单：":
+                is_missing_section = True
+                continue
+            if is_missing_section and line_str.startswith("- ") and "《" in line_str:
+                 book_name = line_str.split("《", 1)[1].split("》", 1)[0]
+                 missing_books.append(book_name)
+            elif is_missing_section and line_str == "":
+                 break
+
+        if not missing_books:
+            continue
+
+        target_dir = result_file.parent
+        print(f"\n[本地重试] 书单目录: {target_dir.name}")
+        existing_files = {clean_filename(f.stem): f.stem for f in target_dir.glob('*.*')}
+        
+        new_found_lines = []
+        new_missing_lines = []
+        
+        for book in missing_books:
+            clean_name = clean_filename(book)
+            if clean_name in existing_files:
+                new_found_lines.append(f"- 《{book}》: 本次重试跳过（目标目录已存在：{existing_files[clean_name]}）\n")
+                continue
+                
+            file_path = search_file(book, search_dir)
+            if file_path == "未找到":
+                new_missing_lines.append(f"- 《{book}》\n")
+            else:
+                duplicate_file = _find_same_content_file(Path(file_path), target_dir)
+                if duplicate_file is not None:
+                    new_found_lines.append(f"- 《{book}》: 本次重试跳过（目录内已有相同内容文件：{duplicate_file.name}）\n")
+                    continue
+                try:
+                    shutil.copy2(file_path, target_dir)
+                    new_found_lines.append(f"- 《{book}》: 本次重试成功复制 {file_path}\n")
+                except Exception as e:
+                    new_found_lines.append(f"- 《{book}》: 重试复制失败 - {str(e)}\n")
+
+        if not new_found_lines:
+            # 没有任何变化，没必要重写文件
+            continue
+            
+        print(f"  > 找回 {len(new_found_lines)} 本电子书")
+            
+        new_lines = []
+        found_section = False
+        missing_section = False
+        lines = content.splitlines(keepends=True)
+        
+        for line in lines:
+            if line.strip() == "已找到并复制的文件：":
+                found_section = True
+                new_lines.append(line)
+                new_lines.extend(new_found_lines)
+                continue
+                
+            if line.strip() == "未找到的文件清单：":
+                missing_section = True
+                new_lines.append(line)
+                new_lines.extend(new_missing_lines)
+                continue
+                
+            if missing_section and line.strip().startswith("- 《"):
+                continue # 移除原来的缺失书目
+                
+            new_lines.append(line)
+            
+        with result_file.open('w', encoding='utf-8') as f:
+            f.writelines(new_lines)
 
 
 if __name__ == "__main__":

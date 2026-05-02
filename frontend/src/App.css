@@ -174,6 +174,53 @@ button:disabled {
   gap: 0.25rem;
 }
 
+.param-checkbox-group {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.param-checkbox-group input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--accent-color);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.param-checkbox-group .checkbox-label {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  cursor: pointer;
+  user-select: none;
+}
+
+.clipboard-textarea {
+  background: rgba(0, 0, 0, 0.4);
+  border: 1px solid var(--glass-border);
+  border-radius: 6px;
+  padding: 0.65rem;
+  color: #fff;
+  font-size: 0.85rem;
+  font-family: inherit;
+  width: 100%;
+  min-height: 120px;
+  resize: vertical;
+  transition: border-color 0.2s;
+  line-height: 1.5;
+}
+
+.clipboard-textarea:focus {
+  outline: none;
+  border-color: var(--accent-color);
+}
+
+.clipboard-textarea::placeholder {
+  color: var(--text-secondary);
+  opacity: 0.7;
+}
+
 .param-header {
   display: flex;
   justify-content: space-between;
